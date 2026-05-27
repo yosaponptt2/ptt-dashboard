@@ -599,30 +599,34 @@ function DashboardMobile({ dateState }) {
       fontFamily: '"IBM Plex Sans Thai", "IBM Plex Sans", system-ui, sans-serif',
       color: '#111827', overflow: 'hidden', display: 'flex', flexDirection: 'column',
     }}>
-      <div style={{ background: '#0F172A', color: '#fff', padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 18px 18px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <button onClick={() => {
-            const el = document.getElementById('mobile-date-input');
-            if (el) { if (el.showPicker) try { el.showPicker(); } catch (e) { el.focus(); } else el.focus(); }
-          }} style={{ background: 'transparent', border: 'none', textAlign: 'left', padding: 0, color: '#fff', cursor: 'pointer', position: 'relative' }}>
-            <div style={{ fontSize: 11, color: '#94A3B8', display: 'flex', alignItems: 'center', gap: 4 }}>
-              <span>📅</span><span>{dateLabelTh || 'เลือกวัน'}</span><span style={{ fontSize: 9 }}>▾</span>
-            </div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginTop: 2, color: '#fff' }}>ปตท.สำเร็จพัฒนา</div>
-            <input
-              id="mobile-date-input"
-              type="date"
-              value={dateState?.selectedDate || ''}
-              min={dateState?.availableDates && dateState.availableDates[0]}
-              max={dateState?.availableDates && dateState.availableDates[dateState.availableDates.length - 1]}
-              onChange={(e) => dateState?.setSelectedDate(e.target.value)}
-              style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none', width: '100%', height: '100%' }}
-            />
-          </button>
+      <div style={{ background: '#0F172A', color: '#fff', padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 18px 16px' }}>
+        {/* Row 1: title + logout */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div style={{ fontSize: 16, fontWeight: 700, color: '#F1F5F9' }}>ปตท.สำเร็จพัฒนา</div>
           <div
             onClick={() => { if (typeof window.__pttLogout === 'function' && window.confirm('ออกจากระบบ?')) window.__pttLogout(); }}
             title="ออกจากระบบ"
             style={{ width: 36, height: 36, borderRadius: 18, background: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, cursor: 'pointer', userSelect: 'none' }}>AS</div>
+        </div>
+
+        {/* Row 2: date picker — transparent overlay input on top of pill button */}
+        <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', gap: 8,
+          background: 'rgba(255,255,255,0.1)', borderRadius: 8, padding: '9px 16px',
+          border: '1px solid rgba(255,255,255,0.18)', cursor: 'pointer', marginBottom: 14,
+          width: '100%', justifyContent: 'center' }}>
+          <span style={{ fontSize: 15 }}>📅</span>
+          <span style={{ fontSize: 14, fontWeight: 600, color: '#F1F5F9' }}>{dateLabelTh || '— เลือกวันที่ —'}</span>
+          <span style={{ fontSize: 10, color: '#94A3B8' }}>▾</span>
+          {/* Transparent full-area date input — pointerEvents: auto so native picker fires on touch */}
+          <input
+            type="date"
+            value={dateState?.selectedDate || ''}
+            min={dateState?.availableDates && dateState.availableDates[0]}
+            max={dateState?.availableDates && dateState.availableDates[dateState.availableDates.length - 1]}
+            onChange={(e) => dateState?.setSelectedDate(e.target.value)}
+            style={{ position: 'absolute', inset: 0, opacity: 0, width: '100%', height: '100%',
+              cursor: 'pointer', fontSize: 16 /* iOS needs ≥16px to avoid zoom */ }}
+          />
         </div>
 
         <div style={{ marginTop: 14, background: 'rgba(255,255,255,0.06)', borderRadius: 8, padding: 14 }}>
@@ -1227,8 +1231,8 @@ function DateSelector({ value, onChange, min, max, dark }) {
         max={max || undefined}
         onChange={(e) => onChange(e.target.value)}
         style={{
-          position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none',
-          width: '100%', height: '100%',
+          position: 'absolute', inset: 0, opacity: 0,
+          width: '100%', height: '100%', cursor: 'pointer', fontSize: 16,
         }}
       />
     </button>
