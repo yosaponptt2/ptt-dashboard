@@ -1,0 +1,1124 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>PTT สำเร็จพัฒนา · Sales Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; height: 100%; width: 100%; }
+  body {
+    font-family: "IBM Plex Sans Thai", "IBM Plex Sans", system-ui, sans-serif;
+    background: #F4F4F0;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow: hidden;
+  }
+  * { box-sizing: border-box; }
+  #root { width: 100vw; height: 100vh; overflow: hidden; }
+  textarea, input { font-family: inherit; }
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.3 } }
+  @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+  @keyframes slideUp { from { transform: translateY(20px); opacity: 0 } to { transform: translateY(0); opacity: 1 } }
+</style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" crossorigin></script>
+
+<!-- Firebase SDK (v10 modular via compat for simplicity) -->
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+
+<!-- User-supplied Firebase config (see README.md). If absent, app runs in mock-only mode. -->
+<script src="firebase-config.js" onerror="window.__noFirebaseConfig=true"></script>
+
+<script>
+window.DASH_DATA = (function () {
+  const today = {
+    date: '26/05/2569', dateEn: '26 May 2026',
+    amazon: { grossSales: 22565, netSales: 22197, cash: 4708, cups: 295, bakery: 53, premium: { qty: 1, amount: 399 }, others: 40, totalItems: 389 },
+    store: {
+      code: '18351', target: 80000, sales: 55385.05, avgSales: 62747.06,
+      customers: 681, avgCustomers: 702.58, perHead: 81.33,
+      cutToday: { cost: 374.63, sales: 574 },
+      cutAccum: { cost: 11973.52, sales: 17864.25 },
+      delivery: {
+        morning: { bills: 19, amount: 3164, staff: 'มาร์ค' },
+        afternoon: { bills: 38, amount: 6333, staff: 'มาร์ค' },
+        total: { bills: 57, amount: 9497 },
+      },
+    },
+    fuel: {
+      morning: { liters: 8327.067, amount: 346905.17 },
+      night: { liters: 4940.182, amount: 207836.90 },
+      lubricant: { units: 1, amount: 115 },
+      total: { liters: 13267.249, amount: 554857.07 },
+    },
+  };
+
+  const seed = (n) => { let s = n; return () => { s = (s * 9301 + 49297) % 233280; return s / 233280; }; };
+  const rng = seed(42);
+  const wiggle = (base, pct = 0.12) => base * (1 + (rng() - 0.5) * pct * 2);
+  const round = (n, d = 2) => Math.round(n * 10 ** d) / 10 ** d;
+
+  const dailyMay = [];
+  for (let d = 1; d <= 26; d++) {
+    const dow = (d + 3) % 7;
+    const weekendBump = dow === 0 || dow === 6 ? 1.1 : 1.0;
+    dailyMay.push({
+      day: d, label: d.toString(),
+      amazon: round(wiggle(20500, 0.18) * weekendBump),
+      store: round(wiggle(58000, 0.15) * weekendBump),
+      fuel: round(wiggle(520000, 0.14) * weekendBump),
+      customers: Math.round(wiggle(650, 0.12) * weekendBump),
+      liters: round(wiggle(12800, 0.12) * weekendBump),
+      cups: Math.round(wiggle(280, 0.18) * weekendBump),
+    });
+  }
+  dailyMay[25].amazon = today.amazon.grossSales;
+  dailyMay[25].store = today.store.sales;
+  dailyMay[25].fuel = today.fuel.total.amount;
+  dailyMay[25].customers = today.store.customers;
+  dailyMay[25].liters = today.fuel.total.liters;
+  dailyMay[25].cups = today.amazon.cups;
+
+  const monthly = [
+    { key: 'mar', label: 'มี.ค. 69', labelEn: 'Mar',
+      amazon: { sales: 612000, cups: 8420, target: 650000 },
+      store:  { sales: 1735000, customers: 19200, target: 2480000 },
+      fuel:   { amount: 15820000, liters: 378400, target: 16500000 } },
+    { key: 'apr', label: 'เม.ย. 69', labelEn: 'Apr',
+      amazon: { sales: 638500, cups: 8760, target: 650000 },
+      store:  { sales: 1812400, customers: 20140, target: 2480000 },
+      fuel:   { amount: 16240000, liters: 388900, target: 16500000 } },
+    { key: 'may', label: 'พ.ค. 69', labelEn: 'May',
+      amazon: { sales: dailyMay.reduce((s, x) => s + x.amazon, 0), cups: dailyMay.reduce((s, x) => s + x.cups, 0), target: 650000 },
+      store:  { sales: dailyMay.reduce((s, x) => s + x.store, 0), customers: dailyMay.reduce((s, x) => s + x.customers, 0), target: 2480000 },
+      fuel:   { amount: dailyMay.reduce((s, x) => s + x.fuel, 0), liters: dailyMay.reduce((s, x) => s + x.liters, 0), target: 16500000 } },
+  ];
+
+  const lineMessages = [
+    { id: 'm5', time: '21:48', source: 'รายงานน้ำมัน · กะดึก', business: 'fuel',   preview: 'รวม 13,267.249 ลิตร · 554,857.07 ฿', status: 'new' },
+    { id: 'm4', time: '21:12', source: 'รายงาน Delivery 7-11 บ่าย', business: 'store', preview: '38 บิล · 6,333 ฿ · มาร์ค', status: 'new' },
+    { id: 'm3', time: '20:55', source: 'รายงานยอดขาย · 18351', business: 'store', preview: 'ยอดขาย 55,385.05 / เป้า 80,000', status: 'read' },
+    { id: 'm2', time: '20:30', source: 'รายงาน Amazon ปตท.สำเร็จพัฒนา', business: 'amazon', preview: 'ยอดขาย 22,565 ฿ · 295 แก้ว · 53 ชิ้น', status: 'read' },
+    { id: 'm1', time: '13:22', source: 'รายงาน Delivery 7-11 เช้า', business: 'store', preview: '19 บิล · 3,164 ฿ · มาร์ค', status: 'read' },
+    { id: 'm0', time: '08:05', source: 'รายงานน้ำมัน · กะเช้า', business: 'fuel',   preview: '8,327.067 ลิตร · 346,905.17 ฿', status: 'read' },
+  ];
+
+  const fuelByHour = [
+    { h: '00', amount: 28000 }, { h: '02', amount: 22000 }, { h: '04', amount: 18000 },
+    { h: '06', amount: 41000 }, { h: '08', amount: 68000 }, { h: '10', amount: 72000 },
+    { h: '12', amount: 64000 }, { h: '14', amount: 51000 }, { h: '16', amount: 58000 },
+    { h: '18', amount: 71000 }, { h: '20', amount: 49000 }, { h: '22', amount: 12000 },
+  ];
+
+  return {
+    today, dailyMay, monthly, lineMessages, fuelByHour,
+    fmt: {
+      money: (n) => '฿' + Math.round(n).toLocaleString('en-US'),
+      moneyShort: (n) => {
+        if (Math.abs(n) >= 1e6) return '฿' + (n / 1e6).toFixed(2) + 'M';
+        if (Math.abs(n) >= 1e3) return '฿' + (n / 1e3).toFixed(1) + 'K';
+        return '฿' + Math.round(n);
+      },
+      num: (n) => Math.round(n).toLocaleString('en-US'),
+      pct: (n) => (n >= 0 ? '+' : '') + n.toFixed(1) + '%',
+    },
+  };
+})();
+</script>
+
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const BIZ = {
+  amazon: { key: 'amazon', th: 'คาเฟ่ อเมซอน', en: 'Cafe Amazon',       color: '#0B6E4F', soft: '#E6F2EB', icon: '☕' },
+  store:  { key: 'store',  th: 'ร้านสะดวกซื้อ', en: 'Convenience Store', color: '#C84B31', soft: '#FBEAE3', icon: '🏪' },
+  fuel:   { key: 'fuel',   th: 'สถานีน้ำมัน',   en: 'Fuel Station',      color: '#1E3A5F', soft: '#E3E9F2', icon: '⛽' },
+};
+
+function Sparkline({ data, width = 200, height = 40, color = '#0B6E4F', fill = true, strokeWidth = 1.5 }) {
+  if (!data || data.length === 0) return null;
+  const max = Math.max(...data), min = Math.min(...data);
+  const range = max - min || 1; const pad = 2;
+  const stepX = (width - pad * 2) / (data.length - 1);
+  const points = data.map((v, i) => [pad + i * stepX, pad + (1 - (v - min) / range) * (height - pad * 2)]);
+  const pathD = points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p[0].toFixed(1)} ${p[1].toFixed(1)}`).join(' ');
+  const areaD = pathD + ` L ${points[points.length - 1][0]} ${height - pad} L ${pad} ${height - pad} Z`;
+  return (
+    <svg width={width} height={height} style={{ display: 'block' }}>
+      {fill && <path d={areaD} fill={color} opacity={0.12} />}
+      <path d={pathD} fill="none" stroke={color} strokeWidth={strokeWidth} strokeLinejoin="round" strokeLinecap="round" />
+      <circle cx={points[points.length - 1][0]} cy={points[points.length - 1][1]} r={2.5} fill={color} />
+    </svg>
+  );
+}
+
+function BarChart({ data, width = 560, height = 220, color = '#1E3A5F', yFormat = (n) => n, padding = { l: 56, r: 12, t: 12, b: 28 }, barGap = 0.35 }) {
+  const { l, r, t, b } = padding;
+  const innerW = width - l - r, innerH = height - t - b;
+  const max = Math.max(...data.map(d => d.value)) * 1.1 || 1;
+  const stepX = innerW / data.length;
+  const bw = stepX * (1 - barGap);
+  const yTicks = 4;
+  return (
+    <svg width={width} height={height} style={{ display: 'block' }}>
+      {Array.from({ length: yTicks + 1 }, (_, i) => {
+        const v = (max * i) / yTicks; const y = t + (1 - i / yTicks) * innerH;
+        return (
+          <g key={i}>
+            <line x1={l} x2={l + innerW} y1={y} y2={y} stroke="#E5E7EB" strokeWidth={1} strokeDasharray={i === 0 ? '0' : '2 3'} />
+            <text x={l - 8} y={y + 3} fontSize={10} fill="#6B7280" textAnchor="end">{yFormat(v)}</text>
+          </g>
+        );
+      })}
+      {data.map((d, i) => {
+        const x = l + i * stepX + (stepX - bw) / 2;
+        const h = (d.value / max) * innerH;
+        const y = t + innerH - h;
+        return (
+          <g key={i}>
+            <rect x={x} y={y} width={bw} height={h} fill={color} rx={2} />
+            <text x={l + i * stepX + stepX / 2} y={t + innerH + 14} fontSize={10} fill="#6B7280" textAnchor="middle">{d.label}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+function Progress({ value, target, color = '#0B6E4F', height = 6, showLabel = true, fmt = (n) => n }) {
+  const pct = Math.min(100, (value / target) * 100);
+  return (
+    <div>
+      <div style={{ position: 'relative', height, background: '#F3F4F6', borderRadius: height / 2, overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', inset: 0, width: `${pct}%`, background: color, borderRadius: height / 2, transition: 'width .6s ease' }} />
+      </div>
+      {showLabel && (
+        <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 6, fontSize: 11, color: '#6B7280' }}>
+          <span>{fmt(value)} <span style={{ color: '#9CA3AF' }}>/ {fmt(target)}</span></span>
+          <span style={{ color, fontWeight: 600 }}>{pct.toFixed(1)}%</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PillButton({ children, icon, dark, onClick }) {
+  return (
+    <button onClick={onClick} style={{
+      border: '1px solid ' + (dark ? '#334155' : '#E5E7EB'),
+      background: dark ? '#1E293B' : '#fff',
+      color: dark ? '#F1F5F9' : '#374151',
+      borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 500,
+      display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontFamily: 'inherit',
+    }}>
+      {icon && <span style={{ fontSize: 12 }}>{icon}</span>}
+      <span>{children}</span>
+    </button>
+  );
+}
+
+function TopBar({ title, subtitle, dateLabel = '26 พ.ค. 2569' }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '16px 28px', background: '#fff',
+      borderBottom: '1px solid #E5E7EB', color: '#111827', flexShrink: 0,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{ width: 36, height: 36, borderRadius: 6, background: 'linear-gradient(135deg, #1E3A5F, #0B6E4F)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 13 }}>PTT</div>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 600, lineHeight: 1.2 }}>{title}</div>
+          {subtitle && <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>{subtitle}</div>}
+        </div>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <PillButton icon="📅">{dateLabel}</PillButton>
+        <PillButton>Last 3 months ▾</PillButton>
+        <PillButton icon="⬇">Export</PillButton>
+        <div style={{ width: 32, height: 32, borderRadius: 16, background: '#E5E7EB', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, color: '#374151' }}>AS</div>
+      </div>
+    </div>
+  );
+}
+
+function LineFeed({ messages, compact = false }) {
+  const [list, setList] = useState(messages);
+  const [pulse, setPulse] = useState(null);
+  useEffect(() => {
+    const id = setInterval(() => {
+      const samples = [
+        { source: 'รายงานน้ำมัน · กะเย็น',     preview: 'ลิตร 1,240 · 51,608 ฿',   business: 'fuel' },
+        { source: 'รายงาน Delivery 7-11 ค่ำ', preview: '14 บิล · 2,310 ฿',         business: 'store' },
+        { source: 'รายงาน Amazon · รอบสรุป',  preview: '+ 18 แก้ว · 4 ชิ้น เบเกอรี่', business: 'amazon' },
+      ];
+      const pick = samples[Math.floor(Math.random() * samples.length)];
+      const newMsg = { ...pick, id: 'live-' + Date.now(), time: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false }), status: 'new' };
+      setList((prev) => [newMsg, ...prev].slice(0, 8));
+      setPulse(newMsg.id);
+      setTimeout(() => setPulse(null), 1600);
+    }, 12000);
+    return () => clearInterval(id);
+  }, []);
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? 4 : 6, overflow: 'auto' }}>
+      {list.map((m) => {
+        const biz = BIZ[m.business]; const isPulse = pulse === m.id;
+        return (
+          <div key={m.id} style={{
+            display: 'flex', alignItems: 'flex-start', gap: 10,
+            padding: compact ? '8px 10px' : '10px 12px',
+            background: (m.status === 'new' || isPulse) ? '#FFFDF7' : '#fff',
+            border: '1px solid #F1F2EE', borderRadius: 6, transition: 'background .3s',
+            boxShadow: isPulse ? `0 0 0 2px ${biz.color}55` : 'none',
+          }}>
+            <div style={{ width: 28, height: 28, borderRadius: 4, background: biz.soft, color: biz.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 14, flexShrink: 0 }}>{biz.icon}</div>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.source}</div>
+                <div style={{ fontSize: 10, color: '#9CA3AF', flexShrink: 0 }}>{m.time}</div>
+              </div>
+              <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.preview}</div>
+            </div>
+            {(m.status === 'new' || isPulse) && (<div style={{ width: 6, height: 6, borderRadius: 3, background: '#22C55E', flexShrink: 0, marginTop: 8 }} />)}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+Object.assign(window, { BIZ, Sparkline, BarChart, Progress, TopBar, PillButton, LineFeed });
+</script>
+
+<script type="text/babel">
+function DashboardV2() {
+  const D = window.DASH_DATA;
+  const { fmt } = D;
+  const may = D.monthly[2];
+  return (
+    <div style={{
+      width: '100%', height: '100%', background: '#F4F4F0',
+      fontFamily: '"IBM Plex Sans Thai", "IBM Plex Sans", system-ui, sans-serif',
+      color: '#111827', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+    }}>
+      <TopBar title="Performance Comparison" subtitle="เปรียบเทียบยอดขาย 3 ธุรกิจ · ปตท.สำเร็จพัฒนา" />
+
+      <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 320px', gap: 12, padding: 20, overflow: 'auto', minHeight: 0 }}>
+        <BusinessColumn
+          biz={BIZ.amazon} dailySeries={D.dailyMay.map(d => d.amazon)} delta={6.3}
+          metrics={[
+            { label: 'ยอดขายรวม', sub: 'Gross Sales',    value: fmt.money(D.today.amazon.grossSales), color: BIZ.amazon.color },
+            { label: 'ยอดสุทธิ',  sub: 'After Discount', value: fmt.money(D.today.amazon.netSales) },
+            { label: 'เงินสด',    sub: 'Cash',           value: fmt.money(D.today.amazon.cash) },
+            { label: 'ส่วนลด',    sub: 'Discount',       value: fmt.money(D.today.amazon.grossSales - D.today.amazon.netSales) },
+          ]}
+          breakdown={[
+            { label: 'แก้วเครื่องดื่ม', sub: 'Beverages', qty: D.today.amazon.cups,           unit: 'แก้ว',    color: BIZ.amazon.color, pct: 76 },
+            { label: 'เบเกอรี่',       sub: 'Bakery',    qty: D.today.amazon.bakery,         unit: 'ชิ้น',    color: '#D97757',         pct: 14 },
+            { label: 'พรีเมียม',       sub: 'Premium',   qty: D.today.amazon.premium.qty,    unit: 'ชิ้น',    color: '#9B6B3A',         pct: 0.3 },
+            { label: 'อื่นๆ',          sub: 'Others',    qty: D.today.amazon.others,         unit: 'รายการ',  color: '#94908a',         pct: 10 },
+          ]}
+          monthlyTarget={650000} monthlyAchieved={may.amazon.sales}
+        />
+
+        <BusinessColumn
+          biz={BIZ.store} dailySeries={D.dailyMay.map(d => d.store)} delta={4.1}
+          metrics={[
+            { label: 'ยอดขายวันนี้', sub: 'Daily Sales',  value: fmt.money(D.today.store.sales), color: BIZ.store.color },
+            { label: 'เป้าหมาย',     sub: 'Daily Target', value: fmt.money(D.today.store.target) },
+            { label: 'ลูกค้า',       sub: 'Customers',    value: fmt.num(D.today.store.customers) },
+            { label: 'ยอดต่อหัว',    sub: 'Per Capita',   value: '฿' + D.today.store.perHead.toFixed(2) },
+          ]}
+          targetProgress={{ value: D.today.store.sales, target: D.today.store.target, label: 'เทียบเป้ารายวัน' }}
+          extra={
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8, fontWeight: 600 }}>Delivery 7-11</div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                <DeliveryStat label="เช้า" en="Morning"   bills={D.today.store.delivery.morning.bills}   amount={D.today.store.delivery.morning.amount} />
+                <DeliveryStat label="บ่าย" en="Afternoon" bills={D.today.store.delivery.afternoon.bills} amount={D.today.store.delivery.afternoon.amount} />
+              </div>
+              <div style={{ marginTop: 8, padding: '8px 10px', background: BIZ.store.soft, borderRadius: 4, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: 11, color: BIZ.store.color, fontWeight: 600 }}>รวม Delivery</span>
+                <span style={{ fontSize: 13, fontWeight: 700, color: BIZ.store.color }}>
+                  {D.today.store.delivery.total.bills} บิล · {fmt.money(D.today.store.delivery.total.amount)}
+                </span>
+              </div>
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #E5E7EB' }}>
+                <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 6, fontWeight: 600 }}>ตัดจ่ายสะสม · Daily P/L</div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                  <span style={{ color: '#6B7280' }}>ทุน · Cost</span>
+                  <span style={{ fontWeight: 600 }}>{fmt.money(D.today.store.cutAccum.cost)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 4 }}>
+                  <span style={{ color: '#6B7280' }}>ขาย · Sales</span>
+                  <span style={{ fontWeight: 600 }}>{fmt.money(D.today.store.cutAccum.sales)}</span>
+                </div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginTop: 4 }}>
+                  <span style={{ color: '#6B7280' }}>กำไรขั้นต้น</span>
+                  <span style={{ fontWeight: 700, color: '#0B6E4F' }}>{fmt.money(D.today.store.cutAccum.sales - D.today.store.cutAccum.cost)}</span>
+                </div>
+              </div>
+            </div>
+          }
+          monthlyTarget={2480000} monthlyAchieved={may.store.sales}
+        />
+
+        <BusinessColumn
+          biz={BIZ.fuel} dailySeries={D.dailyMay.map(d => d.fuel)} delta={3.5}
+          metrics={[
+            { label: 'ยอดขาย',       sub: 'Sales (THB)', value: fmt.money(D.today.fuel.total.amount), color: BIZ.fuel.color },
+            { label: 'รวมลิตร',      sub: 'Volume (L)',  value: fmt.num(D.today.fuel.total.liters) },
+            { label: 'น้ำมันหล่อลื่น', sub: 'Lubricant',   value: D.today.fuel.lubricant.units + ' · ฿' + D.today.fuel.lubricant.amount },
+            { label: 'ราคาเฉลี่ย',    sub: 'Avg ฿/L',     value: '฿' + (D.today.fuel.total.amount / D.today.fuel.total.liters).toFixed(2) },
+          ]}
+          extra={
+            <div style={{ marginTop: 12 }}>
+              <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8, fontWeight: 600 }}>แยกตามกะ · By Shift</div>
+              <ShiftRow label="กะเช้า" en="Morning" liters={D.today.fuel.morning.liters} amount={D.today.fuel.morning.amount} color={BIZ.fuel.color} pct={(D.today.fuel.morning.liters / D.today.fuel.total.liters) * 100} />
+              <ShiftRow label="กะดึก" en="Night"   liters={D.today.fuel.night.liters}   amount={D.today.fuel.night.amount}   color="#475569"        pct={(D.today.fuel.night.liters   / D.today.fuel.total.liters) * 100} />
+              <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px dashed #E5E7EB' }}>
+                <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 6, fontWeight: 600 }}>รายชั่วโมง · Hourly (฿)</div>
+                <BarChart width={260} height={90} padding={{ l: 30, r: 4, t: 4, b: 18 }} yFormat={(n) => (n / 1000).toFixed(0) + 'k'} color={BIZ.fuel.color} data={D.fuelByHour.map(h => ({ label: h.h, value: h.amount }))} />
+              </div>
+            </div>
+          }
+          monthlyTarget={16500000} monthlyAchieved={may.fuel.amount}
+        />
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, minHeight: 0 }}>
+          <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #E5E7EB', padding: 16, display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ width: 14, height: 14, borderRadius: 3, background: '#06C755', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 9, fontWeight: 700 }}>L</span>
+                  LINE Notifications
+                </div>
+                <div style={{ fontSize: 10, color: '#9CA3AF', marginTop: 2 }}>รายงานล่าสุดจาก LINE</div>
+              </div>
+              <div style={{ fontSize: 10, color: '#22C55E', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                <span style={{ width: 6, height: 6, borderRadius: 3, background: '#22C55E', animation: 'pulse 1.5s infinite' }} />
+                LIVE
+              </div>
+            </div>
+            <LineFeed messages={D.lineMessages} compact />
+          </div>
+
+          <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #E5E7EB', padding: 16 }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>แนวโน้ม 3 เดือน</div>
+            <div style={{ fontSize: 10, color: '#9CA3AF', marginBottom: 10 }}>Mar – May trend</div>
+            <MiniMonthlyTrend monthly={D.monthly} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BusinessColumn({ biz, dailySeries, delta, metrics, breakdown, extra, targetProgress, monthlyTarget, monthlyAchieved }) {
+  const D = window.DASH_DATA;
+  return (
+    <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #E5E7EB', display: 'flex', flexDirection: 'column', overflow: 'hidden', minHeight: 0 }}>
+      <div style={{ background: biz.color, color: '#fff', padding: '14px 18px', display: 'flex', alignItems: 'center', gap: 10 }}>
+        <div style={{ width: 32, height: 32, borderRadius: 6, background: 'rgba(255,255,255,0.18)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>{biz.icon}</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 600 }}>{biz.th}</div>
+          <div style={{ fontSize: 10, opacity: 0.8 }}>{biz.en}</div>
+        </div>
+        <div style={{ fontSize: 11, fontWeight: 600, background: 'rgba(255,255,255,0.18)', padding: '3px 8px', borderRadius: 3 }}>▲ {delta.toFixed(1)}%</div>
+      </div>
+
+      <div style={{ padding: 16, flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          {metrics.map((m, i) => (
+            <div key={i} style={{ padding: '10px 12px', background: m.color ? biz.soft : '#FAFAF8', borderRadius: 6, borderLeft: m.color ? '3px solid ' + m.color : '3px solid transparent' }}>
+              <div style={{ fontSize: 10, color: '#6B7280', fontWeight: 500 }}>{m.label}</div>
+              <div style={{ fontSize: 9, color: '#9CA3AF' }}>{m.sub}</div>
+              <div style={{ fontSize: 15, fontWeight: 700, color: m.color || '#111827', marginTop: 4, fontFeatureSettings: '"tnum"' }}>{m.value}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ marginTop: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+            <span style={{ fontSize: 10, color: '#6B7280', fontWeight: 600 }}>26 วันที่ผ่านมา · Daily Trend</span>
+            <span style={{ fontSize: 10, color: '#9CA3AF' }}>พ.ค. 69</span>
+          </div>
+          <Sparkline data={dailySeries} width={260} height={48} color={biz.color} />
+        </div>
+
+        {targetProgress && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 10, color: '#6B7280', fontWeight: 600, marginBottom: 4 }}>{targetProgress.label}</div>
+            <Progress value={targetProgress.value} target={targetProgress.target} color={biz.color} fmt={(n) => D.fmt.moneyShort(n)} />
+          </div>
+        )}
+
+        {breakdown && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontSize: 11, color: '#6B7280', marginBottom: 8, fontWeight: 600 }}>Product Mix · สัดส่วนสินค้า</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {breakdown.map((b, i) => (
+                <div key={i}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 3 }}>
+                    <div>
+                      <span style={{ fontSize: 11, fontWeight: 600, color: '#111827' }}>{b.label}</span>
+                      <span style={{ fontSize: 10, color: '#9CA3AF', marginLeft: 6 }}>{b.sub}</span>
+                    </div>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: b.color, fontFeatureSettings: '"tnum"' }}>{b.qty} {b.unit}</span>
+                  </div>
+                  <div style={{ height: 4, background: '#F3F4F6', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ width: `${b.pct}%`, height: '100%', background: b.color }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {extra}
+
+        <div style={{ marginTop: 'auto', paddingTop: 12, borderTop: '1px solid #F3F4F6' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#6B7280', marginBottom: 4 }}>
+            <span style={{ fontWeight: 600 }}>เป้าเดือน · Monthly Target</span>
+            <span>{((monthlyAchieved / monthlyTarget) * 100).toFixed(1)}%</span>
+          </div>
+          <Progress value={monthlyAchieved} target={monthlyTarget} color={biz.color} showLabel={false} height={4} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#9CA3AF', marginTop: 4 }}>
+            <span>{D.fmt.moneyShort(monthlyAchieved)}</span>
+            <span>เป้า {D.fmt.moneyShort(monthlyTarget)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DeliveryStat({ label, en, bills, amount }) {
+  const D = window.DASH_DATA;
+  return (
+    <div style={{ padding: '8px 10px', background: '#FAFAF8', borderRadius: 4 }}>
+      <div style={{ fontSize: 10, color: '#6B7280', fontWeight: 600 }}>{label} <span style={{ fontWeight: 400, color: '#9CA3AF' }}>· {en}</span></div>
+      <div style={{ fontSize: 13, fontWeight: 700, color: '#111827', marginTop: 2 }}>{bills} <span style={{ fontSize: 10, color: '#9CA3AF', fontWeight: 400 }}>บิล</span></div>
+      <div style={{ fontSize: 11, color: '#6B7280' }}>{D.fmt.money(amount)}</div>
+    </div>
+  );
+}
+
+function ShiftRow({ label, en, liters, amount, color, pct }) {
+  const D = window.DASH_DATA;
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4 }}>
+        <div>
+          <span style={{ fontSize: 11, fontWeight: 600, color: '#111827' }}>{label}</span>
+          <span style={{ fontSize: 10, color: '#9CA3AF', marginLeft: 6 }}>{en}</span>
+        </div>
+        <div style={{ fontSize: 11, fontWeight: 600, color: '#111827', fontFeatureSettings: '"tnum"' }}>{D.fmt.num(liters)} L</div>
+      </div>
+      <div style={{ height: 4, background: '#F3F4F6', borderRadius: 2, overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color }} />
+      </div>
+      <div style={{ fontSize: 10, color: '#6B7280', marginTop: 3 }}>{D.fmt.money(amount)}</div>
+    </div>
+  );
+}
+
+function MiniMonthlyTrend({ monthly }) {
+  const D = window.DASH_DATA;
+  return (
+    <div style={{ display: 'flex', gap: 12, justifyContent: 'space-around' }}>
+      {monthly.map((m) => {
+        const total = m.amazon.sales + m.store.sales + m.fuel.amount;
+        const maxTotal = Math.max(...monthly.map(x => x.amazon.sales + x.store.sales + x.fuel.amount));
+        const h = (total / maxTotal) * 130;
+        const aH = (m.amazon.sales / total) * h;
+        const sH = (m.store.sales  / total) * h;
+        const fH = (m.fuel.amount  / total) * h;
+        return (
+          <div key={m.key} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flex: 1 }}>
+            <div style={{ fontSize: 10, fontWeight: 700, color: '#111827', fontFeatureSettings: '"tnum"' }}>{D.fmt.moneyShort(total)}</div>
+            <div style={{ width: 32, height: 130, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', borderRadius: 4, overflow: 'hidden' }}>
+              <div style={{ height: aH, background: BIZ.amazon.color }} />
+              <div style={{ height: sH, background: BIZ.store.color }} />
+              <div style={{ height: fH, background: BIZ.fuel.color }} />
+            </div>
+            <div style={{ fontSize: 10, color: '#6B7280' }}>{m.label}</div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+window.DashboardV2 = DashboardV2;
+</script>
+
+<script type="text/babel">
+function DashboardMobile() {
+  const D = window.DASH_DATA;
+  const { fmt } = D;
+  const may = D.monthly[2];
+  const totalToday = D.today.amazon.grossSales + D.today.store.sales + D.today.fuel.total.amount;
+  const totalMtd = may.amazon.sales + may.store.sales + may.fuel.amount;
+  const totalTarget = may.amazon.target + may.store.target + may.fuel.target;
+
+  return (
+    <div style={{
+      width: '100%', height: '100%', background: '#F4F4F0',
+      fontFamily: '"IBM Plex Sans Thai", "IBM Plex Sans", system-ui, sans-serif',
+      color: '#111827', overflow: 'hidden', display: 'flex', flexDirection: 'column',
+    }}>
+      <div style={{ background: '#0F172A', color: '#fff', padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 18px 18px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 11, color: '#94A3B8' }}>26 พฤษภาคม 2569</div>
+            <div style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}>ปตท.สำเร็จพัฒนา</div>
+          </div>
+          <div style={{ width: 36, height: 36, borderRadius: 18, background: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600 }}>AS</div>
+        </div>
+
+        <div style={{ marginTop: 14, background: 'rgba(255,255,255,0.06)', borderRadius: 8, padding: 14 }}>
+          <div style={{ fontSize: 10, color: '#94A3B8' }}>ยอดขายรวมวันนี้ · Today's Total</div>
+          <div style={{ fontSize: 26, fontWeight: 700, marginTop: 2, fontFeatureSettings: '"tnum"' }}>{fmt.moneyShort(totalToday)}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4 }}>
+            <span style={{ color: '#4ADE80', fontSize: 11, fontWeight: 600 }}>▲ 2.4%</span>
+            <span style={{ fontSize: 11, color: '#94A3B8' }}>vs yesterday</span>
+          </div>
+          <div style={{ marginTop: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: '#94A3B8', marginBottom: 4 }}>
+              <span>MTD · {fmt.moneyShort(totalMtd)}</span>
+              <span>{((totalMtd / totalTarget) * 100).toFixed(1)}%</span>
+            </div>
+            <div style={{ height: 4, background: 'rgba(255,255,255,0.1)', borderRadius: 2, overflow: 'hidden' }}>
+              <div style={{ width: `${(totalMtd / totalTarget) * 100}%`, height: '100%', background: '#4ADE80' }} />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ flex: 1, overflow: 'auto', padding: '14px 16px 24px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        <MobileBizCard biz={BIZ.amazon} value={fmt.money(D.today.amazon.grossSales)} subtitle={`${D.today.amazon.cups} แก้ว · ${D.today.amazon.bakery} ชิ้น`} delta={6.3} spark={D.dailyMay.map(d => d.amazon)} />
+        <MobileBizCard biz={BIZ.store} value={fmt.money(D.today.store.sales)} subtitle={`${D.today.store.customers} ลูกค้า · ต่อหัว ฿${D.today.store.perHead.toFixed(0)}`} delta={4.1} spark={D.dailyMay.map(d => d.store)}
+          extra={
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #E5E7EB', display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 9, color: '#9CA3AF' }}>Delivery 7-11</div>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{D.today.store.delivery.total.bills} บิล</div>
+              </div>
+              <div style={{ flex: 1, textAlign: 'right' }}>
+                <div style={{ fontSize: 9, color: '#9CA3AF' }}>เป้าหมาย</div>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{((D.today.store.sales / D.today.store.target) * 100).toFixed(0)}% / 80K</div>
+              </div>
+            </div>
+          } />
+        <MobileBizCard biz={BIZ.fuel} value={fmt.money(D.today.fuel.total.amount)} subtitle={`${fmt.num(D.today.fuel.total.liters)} ลิตร · ฿${(D.today.fuel.total.amount / D.today.fuel.total.liters).toFixed(2)}/L`} delta={3.5} spark={D.dailyMay.map(d => d.fuel)}
+          extra={
+            <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #E5E7EB', display: 'flex', gap: 8 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 9, color: '#9CA3AF' }}>กะเช้า · Morning</div>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{fmt.num(D.today.fuel.morning.liters)} L</div>
+              </div>
+              <div style={{ flex: 1, textAlign: 'right' }}>
+                <div style={{ fontSize: 9, color: '#9CA3AF' }}>กะดึก · Night</div>
+                <div style={{ fontSize: 12, fontWeight: 600 }}>{fmt.num(D.today.fuel.night.liters)} L</div>
+              </div>
+            </div>
+          } />
+
+        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #E5E7EB', padding: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span style={{ width: 14, height: 14, borderRadius: 3, background: '#06C755', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 9, fontWeight: 700 }}>L</span>
+              รายงานล่าสุด
+            </div>
+            <span style={{ fontSize: 10, color: '#22C55E', fontWeight: 600 }}>● LIVE</span>
+          </div>
+          <LineFeed messages={D.lineMessages.slice(0, 4)} compact />
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', justifyContent: 'space-around', padding: '8px 0 calc(env(safe-area-inset-bottom, 0px) + 12px)', background: '#fff', borderTop: '1px solid #E5E7EB', flexShrink: 0 }}>
+        <BottomTab icon="🏠" label="Overview" active />
+        <BottomTab icon="📊" label="Analytics" />
+        <BottomTab icon="💬" label="LINE" badge={2} />
+        <BottomTab icon="⚙" label="Settings" />
+      </div>
+    </div>
+  );
+}
+
+function MobileBizCard({ biz, value, subtitle, delta, spark, extra }) {
+  return (
+    <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #E5E7EB', padding: 14 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+        <div style={{ width: 32, height: 32, borderRadius: 6, background: biz.soft, color: biz.color, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 16 }}>{biz.icon}</div>
+        <div style={{ flex: 1 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>{biz.th}</div>
+          <div style={{ fontSize: 10, color: '#9CA3AF' }}>{biz.en}</div>
+        </div>
+        <span style={{ fontSize: 11, color: '#0B6E4F', fontWeight: 600 }}>▲ {delta.toFixed(1)}%</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end' }}>
+        <div>
+          <div style={{ fontSize: 20, fontWeight: 700, color: '#111827', fontFeatureSettings: '"tnum"', lineHeight: 1 }}>{value}</div>
+          <div style={{ fontSize: 11, color: '#6B7280', marginTop: 4 }}>{subtitle}</div>
+        </div>
+        <Sparkline data={spark} width={120} height={32} color={biz.color} />
+      </div>
+      {extra}
+    </div>
+  );
+}
+
+function BottomTab({ icon, label, active, badge }) {
+  return (
+    <button style={{ border: 'none', background: 'transparent', cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, color: active ? '#1E3A5F' : '#9CA3AF', fontFamily: 'inherit', position: 'relative' }}>
+      <span style={{ fontSize: 18, opacity: active ? 1 : 0.7 }}>{icon}</span>
+      <span style={{ fontSize: 10, fontWeight: active ? 600 : 500 }}>{label}</span>
+      {badge && (
+        <span style={{ position: 'absolute', top: -2, right: 8, background: '#C84B31', color: '#fff', fontSize: 9, fontWeight: 700, width: 14, height: 14, borderRadius: 7, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>{badge}</span>
+      )}
+    </button>
+  );
+}
+
+window.DashboardMobile = DashboardMobile;
+</script>
+
+<!-- =================== PARSER (LINE message → structured data) =================== -->
+<script>
+(function () {
+  // Parse a number with optional commas: "22,565" → 22565, "13,267.249" → 13267.249
+  const num = (s) => {
+    if (s == null) return null;
+    const cleaned = String(s).replace(/[,\s]/g, '');
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? null : n;
+  };
+
+  // Find first number after a label regex. Label is matched as a prefix; the next number on the same or next line is captured.
+  const grab = (text, labelRe) => {
+    const re = new RegExp(labelRe.source + '[^\\d-]{0,20}([\\d,]+(?:\\.\\d+)?)', labelRe.flags || 'i');
+    const m = text.match(re);
+    return m ? num(m[1]) : null;
+  };
+
+  // Buddhist year (2569) → CE year (2026)
+  const beToAd = (y) => (y > 2400 ? y - 543 : y);
+
+  // Extract Thai/Western date → "YYYY-MM-DD" (Gregorian). Returns null if not found.
+  function extractDate(text) {
+    // dd/mm/yyyy (Buddhist or Gregorian)
+    let m = text.match(/(\d{1,2})\s*\/\s*(\d{1,2})\s*\/\s*(\d{4})/);
+    if (m) {
+      const d = +m[1], mo = +m[2], y = beToAd(+m[3]);
+      return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+    // "26 พฤษภาคม 2569" or "26 พฤศภาคม 2569" (with typo)
+    const months = { 'มกราคม':1, 'กุมภาพันธ์':2, 'มีนาคม':3, 'เมษายน':4, 'พฤษภาคม':5, 'พฤศภาคม':5, 'มิถุนายน':6, 'กรกฎาคม':7, 'สิงหาคม':8, 'กันยายน':9, 'ตุลาคม':10, 'พฤศจิกายน':11, 'ธันวาคม':12 };
+    const monthRe = Object.keys(months).join('|');
+    m = text.match(new RegExp(`(\\d{1,2})\\s+(${monthRe})\\s+(\\d{4})`));
+    if (m) {
+      const d = +m[1], mo = months[m[2]], y = beToAd(+m[3]);
+      return `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    }
+    return null;
+  }
+
+  // Detect which business a chunk of text describes
+  function detectBusiness(text) {
+    const t = text;
+    if (/อเมซอน|ยอดแก้ว|Bakery|พรีเมียม/i.test(t) && /ยอดขายทั้งหมด|ยอดขายหลังหัก|ยอดเงินสด/i.test(t)) return 'amazon';
+    if (/น้ำมัน.*กะ\s*(เช้า|ดึก)|ลิตร.*บาท|น้ำมันหล่อลื่น/i.test(t)) return 'fuel';
+    if (/18351|เป้าหมายยอดขาย|เฉลี่ยลูกค้า|ต่อหัว|Delivery\s*7-?11|ตัดจ่าย/i.test(t)) return 'store';
+    return null;
+  }
+
+  // Split a combined paste into per-business chunks. Returns [{ business, text }].
+  function splitChunks(raw) {
+    // Try to split on common separators or on business keywords. Simple approach: scan whole text,
+    // try parsing as a whole first; if multi-business signals are present, split on known headers.
+    const text = raw.trim();
+    const markers = [
+      { biz: 'amazon', re: /(?:^|\n)[^\n]*(?:ยอดขายประจำเดือน|อเมซอน\s*ปตท|☕)[^\n]*/ },
+      { biz: 'store',  re: /(?:^|\n)[^\n]*(?:รายงานยอดขาย|18351\s*ปตท|🌴|🌻)[^\n]*/ },
+      { biz: 'fuel',   re: /(?:^|\n)[^\n]*(?:สรุปยอดขายน้ำมัน|ยอดขายน้ำมัน\s*กะ)[^\n]*/ },
+    ];
+    const found = [];
+    for (const mk of markers) {
+      const m = text.match(mk.re);
+      if (m) found.push({ biz: mk.biz, idx: m.index });
+    }
+    if (found.length === 0) {
+      // single business — detect & return
+      const b = detectBusiness(text);
+      return b ? [{ business: b, text }] : [];
+    }
+    found.sort((a, b) => a.idx - b.idx);
+    const chunks = [];
+    for (let i = 0; i < found.length; i++) {
+      const start = found[i].idx;
+      const end = i + 1 < found.length ? found[i + 1].idx : text.length;
+      chunks.push({ business: found[i].biz, text: text.slice(start, end).trim() });
+    }
+    return chunks;
+  }
+
+  function parseAmazon(text) {
+    return {
+      grossSales: grab(text, /ยอดขายทั้งหมด/),
+      netSales: grab(text, /ยอดขายหลังหัก(?:ส่วนลด)?/),
+      cash: grab(text, /ยอดเงินสด/),
+      cups: grab(text, /ยอดแก้ว/),
+      bakery: grab(text, /Bakery/i),
+      premium: {
+        qty: (() => { const m = text.match(/Premium\s+(\d+)\s*ชิ้น/i); return m ? +m[1] : null; })(),
+        amount: grab(text, /Premium[^\n]*ยอดเงิน/i),
+      },
+      others: grab(text, /อื่นๆ/),
+      totalItems: grab(text, /^\s*รวม\s/m),
+    };
+  }
+
+  function parseStore(text) {
+    const morningBills = (() => { const m = text.match(/เช้าได้\s*=\s*(\d+)\s*บิล/); return m ? +m[1] : null; })();
+    const morningAmount = grab(text, /เช้าได้[\s\S]{0,80}?จำนวนเงิน/);
+    const afternoonBills = (() => { const m = text.match(/บ่ายได้\s*=\s*(\d+)\s*บิล/); return m ? +m[1] : null; })();
+    const afternoonAmount = grab(text, /บ่ายได้[\s\S]{0,80}?จำนวนเงิน/);
+    const totalBills = (() => { const m = text.match(/รวมทั้งหมด\s*=\s*(\d+)\s*บิล/); return m ? +m[1] : null; })();
+    const totalAmount = grab(text, /ยอดเงินรวม/);
+
+    return {
+      code: (() => { const m = text.match(/(\d{5})\s*ปตท/); return m ? m[1] : null; })(),
+      target: grab(text, /เป้าหมายยอดขาย/),
+      sales: grab(text, /^ยอดขาย\s*=/m) ?? grab(text, /ยอดขาย\s*=/),
+      avgSales: grab(text, /ยอดเฉลี่ย/),
+      customers: grab(text, /^ลูกค้า\s*=/m) ?? grab(text, /ลูกค้า\s*=/),
+      avgCustomers: grab(text, /เฉลี่ยลูกค้า/),
+      perHead: grab(text, /ต่อหัว/),
+      cutToday: {
+        cost: grab(text, /ตัดจ่าย\(วัน\)[\s\S]{0,40}?ทุน/),
+        sales: grab(text, /ตัดจ่าย\(วัน\)[\s\S]{0,80}?ขาย/),
+      },
+      cutAccum: {
+        cost: grab(text, /\(ตัดจ่ายสะสม\)[\s\S]{0,40}?ทุน/),
+        sales: grab(text, /\(ตัดจ่ายสะสม\)[\s\S]{0,80}?ขาย/),
+      },
+      delivery: {
+        morning: { bills: morningBills, amount: morningAmount },
+        afternoon: { bills: afternoonBills, amount: afternoonAmount },
+        total: { bills: totalBills, amount: totalAmount },
+      },
+    };
+  }
+
+  function parseFuel(text) {
+    const morningLiters = grab(text, /กะ\s*เช้า/);
+    // grab amount after "กะ เช้า ... ยอดเงิน"
+    const mMorn = text.match(/กะ\s*เช้า[\s\S]{0,120}?ยอดเงิน\s*([\d,]+(?:\.\d+)?)/);
+    const morningAmount = mMorn ? num(mMorn[1]) : null;
+
+    const nightLiters = grab(text, /กะ\s*ดึก/);
+    const mNight = text.match(/กะ\s*ดึก[\s\S]{0,120}?ยอดเงิน\s*([\d,]+(?:\.\d+)?)/);
+    const nightAmount = mNight ? num(mNight[1]) : null;
+
+    const lubUnits = grab(text, /น้ำมันหล่อลื่น/);
+    const mLub = text.match(/น้ำมันหล่อลื่น[\s\S]{0,80}?ยอดเงิน\s*([\d,]+(?:\.\d+)?)/);
+    const lubAmount = mLub ? num(mLub[1]) : null;
+
+    const totalLiters = grab(text, /รวมลิตร/);
+    const totalAmount = grab(text, /รวมเป็นเงิน/);
+
+    return {
+      morning: { liters: morningLiters, amount: morningAmount },
+      night: { liters: nightLiters, amount: nightAmount },
+      lubricant: { units: lubUnits, amount: lubAmount },
+      total: { liters: totalLiters, amount: totalAmount },
+    };
+  }
+
+  function parseAll(raw) {
+    const chunks = splitChunks(raw);
+    const date = extractDate(raw);
+    const results = [];
+    for (const c of chunks) {
+      let parsed = null;
+      if (c.business === 'amazon') parsed = parseAmazon(c.text);
+      else if (c.business === 'store') parsed = parseStore(c.text);
+      else if (c.business === 'fuel') parsed = parseFuel(c.text);
+      if (parsed) results.push({ business: c.business, date, rawText: c.text, parsed });
+    }
+    return { date, results };
+  }
+
+  window.LineParser = { parseAll, parseAmazon, parseStore, parseFuel, splitChunks, extractDate, detectBusiness };
+})();
+</script>
+
+<!-- =================== FIRESTORE STORE =================== -->
+<script>
+(function () {
+  let db = null;
+  const hasConfig = !window.__noFirebaseConfig && typeof window.FIREBASE_CONFIG === 'object' && window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.projectId;
+  if (hasConfig && window.firebase) {
+    try {
+      firebase.initializeApp(window.FIREBASE_CONFIG);
+      db = firebase.firestore();
+    } catch (e) {
+      console.error('Firebase init failed:', e);
+    }
+  }
+  const listeners = new Set();
+  let cache = []; // array of { id, business, date, parsed, rawText, createdAt }
+
+  function emit() { listeners.forEach((fn) => fn(cache)); }
+
+  function subscribe(cb) {
+    listeners.add(cb);
+    cb(cache);
+    return () => listeners.delete(cb);
+  }
+
+  let unsubFs = null;
+  function startSubscription() {
+    if (!db || unsubFs) return;
+    unsubFs = db.collection('reports').orderBy('date', 'desc').limit(200).onSnapshot(
+      (snap) => {
+        cache = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        emit();
+      },
+      (err) => console.error('Firestore subscribe error:', err),
+    );
+  }
+
+  async function saveReport({ business, date, parsed, rawText }) {
+    if (!db) throw new Error('Firebase ไม่ได้ตั้งค่า — แก้ firebase-config.js ก่อน');
+    const id = `${date}_${business}`;
+    await db.collection('reports').doc(id).set({
+      business, date, parsed, rawText,
+      createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+    }, { merge: true });
+  }
+
+  window.ReportsStore = {
+    isReady: () => !!db,
+    subscribe,
+    startSubscription,
+    saveReport,
+    getToday: (business) => {
+      const today = new Date().toISOString().slice(0, 10);
+      return cache.find((r) => r.business === business && r.date === today) || null;
+    },
+    getByDate: (business, date) => cache.find((r) => r.business === business && r.date === date) || null,
+    getAll: () => cache,
+  };
+
+  if (db) startSubscription();
+})();
+</script>
+
+<!-- =================== ADD-DATA MODAL =================== -->
+<script type="text/babel">
+function AddDataButton({ onClick, mobile }) {
+  return (
+    <button onClick={onClick} title="วางข้อความจาก LINE" style={{
+      position: 'fixed',
+      bottom: mobile ? 76 : 24,
+      right: 24,
+      width: 56, height: 56, borderRadius: 28,
+      background: 'linear-gradient(135deg, #1E3A5F, #0B6E4F)',
+      color: '#fff', border: 'none', cursor: 'pointer',
+      boxShadow: '0 6px 20px rgba(0,0,0,0.25)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: 28, fontWeight: 300, zIndex: 100,
+      fontFamily: 'inherit',
+    }}>+</button>
+  );
+}
+
+function AddDataModal({ open, onClose }) {
+  const [text, setText] = React.useState('');
+  const [preview, setPreview] = React.useState(null);
+  const [status, setStatus] = React.useState(null); // 'saving' | 'ok' | 'err'
+  const [errMsg, setErrMsg] = React.useState('');
+
+  React.useEffect(() => {
+    if (!open) { setText(''); setPreview(null); setStatus(null); setErrMsg(''); }
+  }, [open]);
+
+  function doParse() {
+    if (!text.trim()) { setPreview(null); return; }
+    try {
+      const out = window.LineParser.parseAll(text);
+      setPreview(out);
+    } catch (e) {
+      setErrMsg(String(e));
+    }
+  }
+
+  async function doSave() {
+    if (!preview || preview.results.length === 0) return;
+    if (!preview.date) { setErrMsg('ไม่พบวันที่ในข้อความ — กรุณาตรวจสอบ'); return; }
+    setStatus('saving'); setErrMsg('');
+    try {
+      for (const r of preview.results) {
+        await window.ReportsStore.saveReport({
+          business: r.business, date: preview.date,
+          parsed: r.parsed, rawText: r.rawText,
+        });
+      }
+      setStatus('ok');
+      setTimeout(() => onClose && onClose(), 1200);
+    } catch (e) {
+      setStatus('err'); setErrMsg(e.message || String(e));
+    }
+  }
+
+  if (!open) return null;
+  const fbReady = window.ReportsStore && window.ReportsStore.isReady();
+
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(15,23,42,0.55)',
+      zIndex: 200, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 20, animation: 'fadeIn .15s ease',
+    }} onClick={onClose}>
+      <div onClick={(e) => e.stopPropagation()} style={{
+        background: '#fff', borderRadius: 12, width: '100%', maxWidth: 720, maxHeight: '90vh',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        animation: 'slideUp .2s ease',
+        fontFamily: '"IBM Plex Sans Thai", "IBM Plex Sans", system-ui, sans-serif',
+      }}>
+        <div style={{ padding: '18px 22px', borderBottom: '1px solid #E5E7EB', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: '#111827' }}>วางข้อความจาก LINE</div>
+            <div style={{ fontSize: 11, color: '#6B7280', marginTop: 2 }}>ระบบจะ parse + บันทึกลง Firestore ให้อัตโนมัติ</div>
+          </div>
+          <button onClick={onClose} style={{ border: 'none', background: 'transparent', fontSize: 22, color: '#9CA3AF', cursor: 'pointer', padding: 4 }}>×</button>
+        </div>
+
+        <div style={{ padding: '16px 22px', overflow: 'auto', flex: 1 }}>
+          {!fbReady && (
+            <div style={{ background: '#FEF3C7', border: '1px solid #FCD34D', color: '#92400E', padding: '10px 14px', borderRadius: 6, fontSize: 12, marginBottom: 12 }}>
+              ⚠ Firebase ยังไม่ได้ตั้งค่า — parse ดูได้แต่ save ไม่ได้ ดูวิธีตั้งค่าใน README.md
+            </div>
+          )}
+          <textarea value={text} onChange={(e) => { setText(e.target.value); setPreview(null); }} placeholder="วางข้อความรายงานยอดขายจาก LINE ที่นี่... รองรับ Amazon / 18351 (ร้านสะดวกซื้อ) / น้ำมัน  วางพร้อมกันหลายธุรกิจได้"
+            style={{
+              width: '100%', minHeight: 180, padding: 12, fontSize: 13, lineHeight: 1.5,
+              border: '1px solid #E5E7EB', borderRadius: 6, resize: 'vertical',
+              fontFamily: 'inherit', color: '#111827', background: '#FAFAF8',
+            }} />
+
+          <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+            <button onClick={doParse} disabled={!text.trim()} style={btnStyle('#1E3A5F', !text.trim())}>1. ดูตัวอย่าง parse</button>
+            <button onClick={doSave} disabled={!preview || preview.results.length === 0 || status === 'saving' || !fbReady} style={btnStyle('#0B6E4F', !preview || preview.results.length === 0 || status === 'saving' || !fbReady)}>
+              {status === 'saving' ? 'กำลังบันทึก…' : status === 'ok' ? '✓ บันทึกแล้ว' : '2. บันทึกลง Firestore'}
+            </button>
+          </div>
+
+          {errMsg && <div style={{ marginTop: 10, fontSize: 12, color: '#C84B31' }}>{errMsg}</div>}
+
+          {preview && (
+            <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px solid #F3F4F6' }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', marginBottom: 8 }}>
+                ตัวอย่างข้อมูลที่ parse ได้ · วันที่ {preview.date || '(ไม่พบ)'}
+              </div>
+              {preview.results.length === 0 && (
+                <div style={{ fontSize: 12, color: '#C84B31' }}>ไม่พบข้อมูลที่ parse ได้ — ลองตรวจรูปแบบข้อความ</div>
+              )}
+              {preview.results.map((r, i) => (
+                <div key={i} style={{ marginBottom: 10, padding: 12, background: '#FAFAF8', borderRadius: 6, border: '1px solid #F1F2EE' }}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: '#111827', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <span>{r.business === 'amazon' ? '☕' : r.business === 'store' ? '🏪' : '⛽'}</span>
+                    <span>{r.business === 'amazon' ? 'คาเฟ่ อเมซอน' : r.business === 'store' ? 'ร้านสะดวกซื้อ (18351)' : 'สถานีน้ำมัน'}</span>
+                  </div>
+                  <pre style={{ margin: 0, fontSize: 11, color: '#374151', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'ui-monospace, Menlo, Consolas, monospace' }}>{JSON.stringify(r.parsed, null, 2)}</pre>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function btnStyle(color, disabled) {
+  return {
+    padding: '10px 16px', borderRadius: 6, fontSize: 13, fontWeight: 600,
+    background: disabled ? '#E5E7EB' : color, color: disabled ? '#9CA3AF' : '#fff',
+    border: 'none', cursor: disabled ? 'not-allowed' : 'pointer', fontFamily: 'inherit',
+    transition: 'background .15s',
+  };
+}
+
+// Hook: subscribe to Firestore reports and override window.DASH_DATA.today when matching date exists
+function useFirestoreOverride() {
+  const [reports, setReports] = React.useState([]);
+  React.useEffect(() => {
+    if (!window.ReportsStore) return;
+    const unsub = window.ReportsStore.subscribe(setReports);
+    return unsub;
+  }, []);
+  React.useEffect(() => {
+    // Apply latest report per business to window.DASH_DATA.today
+    const D = window.DASH_DATA;
+    if (!D) return;
+    // Find the most recent date in reports
+    const dates = [...new Set(reports.map((r) => r.date))].sort().reverse();
+    const latest = dates[0];
+    if (!latest) return;
+    for (const biz of ['amazon', 'store', 'fuel']) {
+      const r = reports.find((x) => x.business === biz && x.date === latest);
+      if (r && r.parsed) {
+        D.today[biz] = { ...D.today[biz], ...r.parsed };
+      }
+    }
+    D.today.date = latest.split('-').reverse().join('/'); // YYYY-MM-DD → DD/MM/YYYY-ish
+  }, [reports]);
+  return reports;
+}
+
+window.AddDataButton = AddDataButton;
+window.AddDataModal = AddDataModal;
+window.useFirestoreOverride = useFirestoreOverride;
+</script>
+
+<script type="text/babel">
+const MOBILE_BREAKPOINT = 768;
+function App() {
+  const [isMobile, setIsMobile] = React.useState(() => typeof window !== 'undefined' && window.innerWidth < MOBILE_BREAKPOINT);
+  const [modalOpen, setModalOpen] = React.useState(false);
+  useFirestoreOverride();
+
+  React.useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
+    const handler = (e) => setIsMobile(e.matches);
+    mq.addEventListener ? mq.addEventListener('change', handler) : mq.addListener(handler);
+    return () => { mq.removeEventListener ? mq.removeEventListener('change', handler) : mq.removeListener(handler); };
+  }, []);
+
+  return (
+    <React.Fragment>
+      {isMobile ? <DashboardMobile /> : <DashboardV2 />}
+      <AddDataButton onClick={() => setModalOpen(true)} mobile={isMobile} />
+      <AddDataModal open={modalOpen} onClose={() => setModalOpen(false)} />
+    </React.Fragment>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+
+</body>
+</html>

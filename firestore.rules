@@ -1,0 +1,12 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Phase 1: dashboard ใช้แบบเปิด public อ่าน/เขียนได้ (เพื่อความง่าย)
+    // Phase 2: เพิ่ม Authentication แล้วเปลี่ยนเป็น request.auth != null
+    match /reports/{reportId} {
+      allow read: if true;
+      allow write: if true;
+    }
+  }
+}
