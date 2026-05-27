@@ -420,9 +420,13 @@ function DashboardV2({ dateState }) {
           </div>
 
           <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #E5E7EB', padding: 16 }}>
-            <div style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>แนวโน้ม 3 เดือน</div>
-            <div style={{ fontSize: 10, color: '#9CA3AF', marginBottom: 10 }}>Mar – May trend</div>
-            <MiniMonthlyTrend monthly={D.monthly} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>เทรนด์ 30 วัน</div>
+                <div style={{ fontSize: 10, color: '#9CA3AF' }}>30d vs prior 30d</div>
+              </div>
+            </div>
+            <TrendCompare reports={dateState?.reports || []} endDate={dateState?.selectedDate} compact />
           </div>
         </div>
       </div>
@@ -661,6 +665,14 @@ function DashboardMobile({ dateState }) {
               </div>
             </div>
           } />
+
+        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #E5E7EB', padding: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>เทรนด์ 30 วัน</div>
+            <div style={{ fontSize: 10, color: '#9CA3AF' }}>เทียบ 30 วันก่อนหน้า</div>
+          </div>
+          <TrendCompare reports={dateState?.reports || []} endDate={dateState?.selectedDate} compact />
+        </div>
 
         <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #E5E7EB', padding: 14 }}>
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -1212,10 +1224,98 @@ function DateSelector({ value, onChange, min, max, dark }) {
   );
 }
 
+// Trend comparison: last 30 days (ending at endDate) vs prior 30 days
+function TrendCompare({ reports, endDate, compact = false }) {
+  const stats = React.useMemo(() => {
+    if (!endDate || !reports || !reports.length) return null;
+    const end = new Date(endDate + 'T00:00:00');
+    const last30Start = new Date(end); last30Start.setDate(end.getDate() - 29);
+    const prev30End = new Date(last30Start); prev30End.setDate(last30Start.getDate() - 1);
+    const prev30Start = new Date(prev30End); prev30Start.setDate(prev30End.getDate() - 29);
+    const inRange = (dateStr, start, finish) => {
+      const d = new Date(dateStr + 'T00:00:00');
+      return d >= start && d <= finish;
+    };
+    function sumIn(business, fn, startD, finishD) {
+      let sum = 0, days = 0;
+      for (const r of reports) {
+        if (r.business !== business) continue;
+        if (!inRange(r.date, startD, finishD)) continue;
+        const v = fn(r);
+        if (v != null) { sum += v; days++; }
+      }
+      return { sum, days };
+    }
+    const lines = [
+      { key: 'amazon', label: 'คาเฟ่ อเมซอน', en: 'Cafe Amazon', color: BIZ.amazon.color, icon: '☕', fn: (r) => r.parsed.grossSales },
+      { key: 'store',  label: 'ร้านสะดวกซื้อ', en: '7-Eleven',    color: BIZ.store.color,  icon: '🏪', fn: (r) => r.parsed.sales },
+      { key: 'fuel',   label: 'น้ำมัน',        en: 'Fuel',        color: BIZ.fuel.color,   icon: '⛽', fn: (r) => r.parsed.total?.amount },
+    ];
+    return lines.map((L) => {
+      const cur = sumIn(L.key, L.fn, last30Start, end);
+      const prv = sumIn(L.key, L.fn, prev30Start, prev30End);
+      const delta = prv.sum > 0 ? ((cur.sum - prv.sum) / prv.sum) * 100 : 0;
+      return { ...L, cur: cur.sum, prv: prv.sum, days: cur.days, delta };
+    });
+  }, [reports, endDate]);
+
+  const D = window.DASH_DATA;
+  if (!stats) return null;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? 8 : 10 }}>
+      {stats.map((s) => {
+        const isUp = s.delta >= 0;
+        const arrow = isUp ? '▲' : '▼';
+        const deltaColor = isUp ? '#0B6E4F' : '#C84B31';
+        const maxBar = Math.max(s.cur, s.prv) || 1;
+        const curW = (s.cur / maxBar) * 100;
+        const prvW = (s.prv / maxBar) * 100;
+        return (
+          <div key={s.key} style={{ padding: compact ? '10px 12px' : '12px 14px', background: '#FAFAF8', border: '1px solid #F1F2EE', borderRadius: 6 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <span style={{ fontSize: 14 }}>{s.icon}</span>
+                <div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: '#111827' }}>{s.label}</div>
+                  <div style={{ fontSize: 9, color: '#9CA3AF' }}>{s.en} · {s.days} วัน</div>
+                </div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 13, fontWeight: 700, color: s.color, fontFeatureSettings: '"tnum"' }}>{D.fmt.moneyShort(s.cur)}</div>
+                <div style={{ fontSize: 10, color: deltaColor, fontWeight: 600, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 3 }}>
+                  <span>{arrow}</span><span>{Math.abs(s.delta).toFixed(1)}%</span>
+                </div>
+              </div>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 9, color: '#6B7280', width: 38 }}>30 วันนี้</span>
+                <div style={{ flex: 1, height: 5, background: '#F3F4F6', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ width: `${curW}%`, height: '100%', background: s.color }} />
+                </div>
+                <span style={{ fontSize: 9, color: '#6B7280', minWidth: 56, textAlign: 'right', fontFeatureSettings: '"tnum"' }}>{D.fmt.moneyShort(s.cur)}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <span style={{ fontSize: 9, color: '#9CA3AF', width: 38 }}>ก่อนหน้า</span>
+                <div style={{ flex: 1, height: 5, background: '#F3F4F6', borderRadius: 3, overflow: 'hidden' }}>
+                  <div style={{ width: `${prvW}%`, height: '100%', background: s.color, opacity: 0.4 }} />
+                </div>
+                <span style={{ fontSize: 9, color: '#9CA3AF', minWidth: 56, textAlign: 'right', fontFeatureSettings: '"tnum"' }}>{D.fmt.moneyShort(s.prv)}</span>
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 window.AddDataButton = AddDataButton;
 window.AddDataModal = AddDataModal;
 window.useReportsState = useReportsState;
 window.DateSelector = DateSelector;
+window.TrendCompare = TrendCompare;
 </script>
 
 <script type="text/babel">
