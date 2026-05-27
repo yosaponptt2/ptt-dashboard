@@ -227,7 +227,7 @@ function PillButton({ children, icon, dark, onClick }) {
   );
 }
 
-function TopBar({ title, subtitle, dateLabel = '26 พ.ค. 2569' }) {
+function TopBar({ title, subtitle, dateState }) {
   return (
     <div style={{
       display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -242,8 +242,14 @@ function TopBar({ title, subtitle, dateLabel = '26 พ.ค. 2569' }) {
         </div>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <PillButton icon="📅">{dateLabel}</PillButton>
-        <PillButton>Last 3 months ▾</PillButton>
+        {dateState && (
+          <DateSelector
+            value={dateState.selectedDate}
+            onChange={dateState.setSelectedDate}
+            min={dateState.availableDates && dateState.availableDates[0]}
+            max={dateState.availableDates && dateState.availableDates[dateState.availableDates.length - 1]}
+          />
+        )}
         <PillButton icon="⬇">Export</PillButton>
         <div style={{ width: 32, height: 32, borderRadius: 16, background: '#E5E7EB', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600, color: '#374151' }}>AS</div>
       </div>
@@ -301,7 +307,7 @@ Object.assign(window, { BIZ, Sparkline, BarChart, Progress, TopBar, PillButton, 
 </script>
 
 <script type="text/babel">
-function DashboardV2() {
+function DashboardV2({ dateState }) {
   const D = window.DASH_DATA;
   const { fmt } = D;
   const may = D.monthly[2];
@@ -311,7 +317,7 @@ function DashboardV2() {
       fontFamily: '"IBM Plex Sans Thai", "IBM Plex Sans", system-ui, sans-serif',
       color: '#111827', overflow: 'hidden', display: 'flex', flexDirection: 'column',
     }}>
-      <TopBar title="Performance Comparison" subtitle="เปรียบเทียบยอดขาย 3 ธุรกิจ · ปตท.สำเร็จพัฒนา" />
+      <TopBar title="Performance Comparison" subtitle="เปรียบเทียบยอดขาย 3 ธุรกิจ · ปตท.สำเร็จพัฒนา" dateState={dateState} />
 
       <div style={{ flex: 1, display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 320px', gap: 12, padding: 20, overflow: 'auto', minHeight: 0 }}>
         <BusinessColumn
@@ -564,13 +570,20 @@ window.DashboardV2 = DashboardV2;
 </script>
 
 <script type="text/babel">
-function DashboardMobile() {
+function DashboardMobile({ dateState }) {
   const D = window.DASH_DATA;
   const { fmt } = D;
   const may = D.monthly[2];
   const totalToday = D.today.amazon.grossSales + D.today.store.sales + D.today.fuel.total.amount;
   const totalMtd = may.amazon.sales + may.store.sales + may.fuel.amount;
   const totalTarget = may.amazon.target + may.store.target + may.fuel.target;
+
+  const dateLabelTh = React.useMemo(() => {
+    if (!dateState?.selectedDate) return '';
+    const [y, mo, d] = dateState.selectedDate.split('-');
+    const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+    return `${parseInt(d)} ${months[parseInt(mo) - 1]} ${(+y) + 543}`;
+  }, [dateState?.selectedDate]);
 
   return (
     <div style={{
@@ -580,10 +593,24 @@ function DashboardMobile() {
     }}>
       <div style={{ background: '#0F172A', color: '#fff', padding: 'calc(env(safe-area-inset-top, 0px) + 14px) 18px 18px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <div>
-            <div style={{ fontSize: 11, color: '#94A3B8' }}>26 พฤษภาคม 2569</div>
-            <div style={{ fontSize: 16, fontWeight: 600, marginTop: 2 }}>ปตท.สำเร็จพัฒนา</div>
-          </div>
+          <button onClick={() => {
+            const el = document.getElementById('mobile-date-input');
+            if (el) { if (el.showPicker) try { el.showPicker(); } catch (e) { el.focus(); } else el.focus(); }
+          }} style={{ background: 'transparent', border: 'none', textAlign: 'left', padding: 0, color: '#fff', cursor: 'pointer', position: 'relative' }}>
+            <div style={{ fontSize: 11, color: '#94A3B8', display: 'flex', alignItems: 'center', gap: 4 }}>
+              <span>📅</span><span>{dateLabelTh || 'เลือกวัน'}</span><span style={{ fontSize: 9 }}>▾</span>
+            </div>
+            <div style={{ fontSize: 16, fontWeight: 600, marginTop: 2, color: '#fff' }}>ปตท.สำเร็จพัฒนา</div>
+            <input
+              id="mobile-date-input"
+              type="date"
+              value={dateState?.selectedDate || ''}
+              min={dateState?.availableDates && dateState.availableDates[0]}
+              max={dateState?.availableDates && dateState.availableDates[dateState.availableDates.length - 1]}
+              onChange={(e) => dateState?.setSelectedDate(e.target.value)}
+              style={{ position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none', width: '100%', height: '100%' }}
+            />
+          </button>
           <div style={{ width: 36, height: 36, borderRadius: 18, background: '#334155', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 600 }}>AS</div>
         </div>
 
@@ -892,7 +919,7 @@ window.DashboardMobile = DashboardMobile;
   let unsubFs = null;
   function startSubscription() {
     if (!db || unsubFs) return;
-    unsubFs = db.collection('reports').orderBy('date', 'desc').limit(200).onSnapshot(
+    unsubFs = db.collection('reports').orderBy('date', 'desc').limit(4000).onSnapshot(
       (snap) => {
         cache = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
         emit();
@@ -1063,36 +1090,132 @@ function btnStyle(color, disabled) {
   };
 }
 
-// Hook: subscribe to Firestore reports and override window.DASH_DATA.today when matching date exists
-function useFirestoreOverride() {
-  const [reports, setReports] = React.useState([]);
+// Hook: subscribe to Firestore reports + manage selectedDate.
+// When reports or selectedDate change: rewrite window.DASH_DATA.today and dailyMay accordingly.
+// Returns { reports, selectedDate, setSelectedDate, availableDates, latestDate }
+function useReportsState() {
+  const [reports, setReports] = React.useState(() => (window.ReportsStore && window.ReportsStore.getAll()) || []);
+  const [selectedDate, setSelectedDate] = React.useState(null);
+  const [tick, setTick] = React.useState(0); // force re-render after mutating DASH_DATA
+
   React.useEffect(() => {
     if (!window.ReportsStore) return;
     const unsub = window.ReportsStore.subscribe(setReports);
     return unsub;
   }, []);
+
+  const availableDates = React.useMemo(
+    () => [...new Set(reports.map((r) => r.date))].sort(),
+    [reports]
+  );
+  const latestDate = availableDates[availableDates.length - 1] || null;
+
+  // Auto-pick latest date once data arrives (only if user hasn't manually picked yet)
   React.useEffect(() => {
-    // Apply latest report per business to window.DASH_DATA.today
+    if (!selectedDate && latestDate) setSelectedDate(latestDate);
+  }, [latestDate, selectedDate]);
+
+  // Apply data for selectedDate into DASH_DATA
+  React.useEffect(() => {
     const D = window.DASH_DATA;
-    if (!D) return;
-    // Find the most recent date in reports
-    const dates = [...new Set(reports.map((r) => r.date))].sort().reverse();
-    const latest = dates[0];
-    if (!latest) return;
+    if (!D || !selectedDate) return;
+
+    // 1. Set today's per-business data
     for (const biz of ['amazon', 'store', 'fuel']) {
-      const r = reports.find((x) => x.business === biz && x.date === latest);
+      const r = reports.find((x) => x.business === biz && x.date === selectedDate);
       if (r && r.parsed) {
         D.today[biz] = { ...D.today[biz], ...r.parsed };
+        // Patch nested objects so missing nested fields fall back to mock instead of breaking
+        if (biz === 'fuel' && r.parsed.total) D.today.fuel.total = { ...D.today.fuel.total, ...r.parsed.total };
+        if (biz === 'fuel' && r.parsed.morning) D.today.fuel.morning = { ...D.today.fuel.morning, ...r.parsed.morning };
+        if (biz === 'fuel' && r.parsed.night) D.today.fuel.night = { ...D.today.fuel.night, ...r.parsed.night };
+        if (biz === 'fuel' && r.parsed.lubricant) D.today.fuel.lubricant = { ...D.today.fuel.lubricant, ...r.parsed.lubricant };
+        if (biz === 'store' && r.parsed.delivery) D.today.store.delivery = { ...D.today.store.delivery, ...r.parsed.delivery };
+        if (biz === 'store' && r.parsed.cutToday) D.today.store.cutToday = { ...D.today.store.cutToday, ...r.parsed.cutToday };
+        if (biz === 'store' && r.parsed.cutAccum) D.today.store.cutAccum = { ...D.today.store.cutAccum, ...r.parsed.cutAccum };
+        if (biz === 'amazon' && r.parsed.premium) D.today.amazon.premium = { ...D.today.amazon.premium, ...r.parsed.premium };
       }
     }
-    D.today.date = latest.split('-').reverse().join('/'); // YYYY-MM-DD → DD/MM/YYYY-ish
-  }, [reports]);
-  return reports;
+    D.today.date = selectedDate.split('-').reverse().join('/');
+
+    // 2. Build 26-day series ending at selectedDate (real data, fallback 0 for missing days)
+    const endDate = new Date(selectedDate + 'T00:00:00');
+    const series = [];
+    for (let i = 25; i >= 0; i--) {
+      const d = new Date(endDate);
+      d.setDate(endDate.getDate() - i);
+      const iso = d.toISOString().slice(0, 10);
+      const amz = reports.find((x) => x.business === 'amazon' && x.date === iso);
+      const sto = reports.find((x) => x.business === 'store'  && x.date === iso);
+      const ful = reports.find((x) => x.business === 'fuel'   && x.date === iso);
+      series.push({
+        day: d.getDate(),
+        label: String(d.getDate()),
+        amazon:    amz?.parsed?.grossSales || 0,
+        store:     sto?.parsed?.sales       || 0,
+        fuel:      ful?.parsed?.total?.amount || 0,
+        liters:    ful?.parsed?.total?.liters || 0,
+        customers: sto?.parsed?.customers   || 0,
+        cups:      amz?.parsed?.cups        || 0,
+      });
+    }
+    D.dailyMay = series;
+
+    setTick((t) => t + 1);
+  }, [reports, selectedDate]);
+
+  return { reports, selectedDate, setSelectedDate, availableDates, latestDate, tick };
+}
+
+// Compact date selector — uses native <input type="date"> but shows Thai label
+function DateSelector({ value, onChange, min, max, dark }) {
+  const ref = React.useRef(null);
+  const display = React.useMemo(() => {
+    if (!value) return '— เลือกวัน —';
+    const [y, mo, d] = value.split('-');
+    const monthsTh = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+    return `${parseInt(d)} ${monthsTh[parseInt(mo) - 1]} ${(+y) + 543}`;
+  }, [value]);
+
+  function openPicker() {
+    if (!ref.current) return;
+    if (ref.current.showPicker) try { ref.current.showPicker(); return; } catch (e) {}
+    ref.current.focus();
+    ref.current.click();
+  }
+
+  return (
+    <button type="button" onClick={openPicker} style={{
+      border: '1px solid ' + (dark ? '#334155' : '#E5E7EB'),
+      background: dark ? '#1E293B' : '#fff',
+      color: dark ? '#F1F5F9' : '#374151',
+      borderRadius: 6, padding: '6px 12px', fontSize: 12, fontWeight: 600,
+      display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer',
+      fontFamily: 'inherit', position: 'relative',
+    }}>
+      <span style={{ fontSize: 13 }}>📅</span>
+      <span>{display}</span>
+      <span style={{ fontSize: 9, color: '#9CA3AF', marginLeft: 4 }}>▾</span>
+      <input
+        ref={ref}
+        type="date"
+        value={value || ''}
+        min={min || undefined}
+        max={max || undefined}
+        onChange={(e) => onChange(e.target.value)}
+        style={{
+          position: 'absolute', inset: 0, opacity: 0, pointerEvents: 'none',
+          width: '100%', height: '100%',
+        }}
+      />
+    </button>
+  );
 }
 
 window.AddDataButton = AddDataButton;
 window.AddDataModal = AddDataModal;
-window.useFirestoreOverride = useFirestoreOverride;
+window.useReportsState = useReportsState;
+window.DateSelector = DateSelector;
 </script>
 
 <script type="text/babel">
@@ -1100,7 +1223,7 @@ const MOBILE_BREAKPOINT = 768;
 function App() {
   const [isMobile, setIsMobile] = React.useState(() => typeof window !== 'undefined' && window.innerWidth < MOBILE_BREAKPOINT);
   const [modalOpen, setModalOpen] = React.useState(false);
-  useFirestoreOverride();
+  const dateState = useReportsState();
 
   React.useEffect(() => {
     const mq = window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT - 1}px)`);
@@ -1111,7 +1234,9 @@ function App() {
 
   return (
     <React.Fragment>
-      {isMobile ? <DashboardMobile /> : <DashboardV2 />}
+      {isMobile
+        ? <DashboardMobile dateState={dateState} />
+        : <DashboardV2 dateState={dateState} />}
       <AddDataButton onClick={() => setModalOpen(true)} mobile={isMobile} />
       <AddDataModal open={modalOpen} onClose={() => setModalOpen(false)} />
     </React.Fragment>
