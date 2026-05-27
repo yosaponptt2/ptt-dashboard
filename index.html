@@ -421,6 +421,14 @@ function DashboardV2({ dateState }) {
             </div>
             <TrendCompare reports={dateState?.reports || []} endDate={dateState?.selectedDate} compact />
           </div>
+
+          <div style={{ background: '#fff', borderRadius: 8, border: '1px solid #E5E7EB', padding: 16 }}>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 12, fontWeight: 600, color: '#111827' }}>ยอดขายรายปี · 12 เดือน</div>
+              <div style={{ fontSize: 10, color: '#9CA3AF' }}>Monthly sales by year</div>
+            </div>
+            <YearlySalesChart reports={dateState?.reports || []} endDate={dateState?.selectedDate} compact />
+          </div>
         </div>
       </div>
     </div>
@@ -673,6 +681,14 @@ function DashboardMobile({ dateState }) {
             <div style={{ fontSize: 10, color: '#9CA3AF' }}>เทียบ 30 วันก่อนหน้า</div>
           </div>
           <TrendCompare reports={dateState?.reports || []} endDate={dateState?.selectedDate} compact />
+        </div>
+
+        <div style={{ background: '#fff', borderRadius: 10, border: '1px solid #E5E7EB', padding: 14 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: '#111827' }}>ยอดขายรายปี</div>
+            <div style={{ fontSize: 10, color: '#9CA3AF' }}>ทุกเดือนในปีที่เลือก</div>
+          </div>
+          <YearlySalesChart reports={dateState?.reports || []} endDate={dateState?.selectedDate} compact />
         </div>
       </div>
 
@@ -1421,12 +1437,109 @@ function MonthlyMTD({ reports, endDate, compact = false }) {
 
 const THAI_MONTH_ABBR = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
 
+// Yearly chart: 12 stacked bars (Amazon + Store + Fuel) for the selected year
+function YearlySalesChart({ reports, endDate, compact = false }) {
+  const defaultYear = endDate ? parseInt(endDate.slice(0, 4)) : new Date().getFullYear();
+  const [selectedYear, setSelectedYear] = React.useState(defaultYear);
+
+  React.useEffect(() => {
+    if (endDate) setSelectedYear(parseInt(endDate.slice(0, 4)));
+  }, [endDate]);
+
+  const { availableYears, monthData } = React.useMemo(() => {
+    if (!reports || !reports.length) return { availableYears: [], monthData: null };
+    const years = [...new Set(reports.map(r => parseInt(r.date.slice(0, 4))))].sort();
+    const months = Array.from({ length: 12 }, (_, i) => ({ month: i, amazon: 0, store: 0, fuel: 0 }));
+    for (const r of reports) {
+      if (parseInt(r.date.slice(0, 4)) !== selectedYear) continue;
+      const mo = parseInt(r.date.slice(5, 7)) - 1;
+      if (mo < 0 || mo > 11) continue;
+      if (r.business === 'amazon' && r.parsed && r.parsed.grossSales) months[mo].amazon += r.parsed.grossSales;
+      if (r.business === 'store'  && r.parsed && r.parsed.sales)       months[mo].store  += r.parsed.sales;
+      if (r.business === 'fuel'   && r.parsed && r.parsed.total && r.parsed.total.amount) months[mo].fuel += r.parsed.total.amount;
+    }
+    return { availableYears: years, monthData: months };
+  }, [reports, selectedYear]);
+
+  const D = window.DASH_DATA;
+  const MONTH_EN = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  const chartH = compact ? 84 : 110;
+
+  if (!monthData) return (
+    <div style={{ textAlign: 'center', fontSize: 12, color: '#9CA3AF', padding: '20px 0' }}>ยังไม่มีข้อมูล</div>
+  );
+
+  const maxTotal = Math.max(...monthData.map(m => m.amazon + m.store + m.fuel)) || 1;
+  const yearTotal = monthData.reduce((s, m) => s + m.amazon + m.store + m.fuel, 0);
+  const canPrev = availableYears.length > 0 && availableYears[0] < selectedYear;
+  const canNext = availableYears.length > 0 && availableYears[availableYears.length - 1] > selectedYear;
+
+  return (
+    <div>
+      {/* Row: legend + year navigator */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {[BIZ.amazon, BIZ.store, BIZ.fuel].map(biz => (
+            <div key={biz.key} style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              <div style={{ width: 8, height: 8, borderRadius: 1, background: biz.color }} />
+              <span style={{ fontSize: 9, color: '#6B7280' }}>{biz.th}</span>
+            </div>
+          ))}
+        </div>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <button onClick={() => canPrev && setSelectedYear(y => y - 1)}
+            style={{ border: 'none', background: 'transparent', fontSize: 15, lineHeight: 1, cursor: canPrev ? 'pointer' : 'default', color: canPrev ? '#374151' : '#D1D5DB', padding: '1px 4px', fontFamily: 'inherit' }}>‹</button>
+          <span style={{ fontSize: 11, fontWeight: 700, color: '#111827', minWidth: 68, textAlign: 'center' }}>ปี {selectedYear + 543}</span>
+          <button onClick={() => canNext && setSelectedYear(y => y + 1)}
+            style={{ border: 'none', background: 'transparent', fontSize: 15, lineHeight: 1, cursor: canNext ? 'pointer' : 'default', color: canNext ? '#374151' : '#D1D5DB', padding: '1px 4px', fontFamily: 'inherit' }}>›</button>
+        </div>
+      </div>
+
+      {/* Stacked bars */}
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: chartH }}>
+        {monthData.map((m, i) => {
+          const total = m.amazon + m.store + m.fuel;
+          const totalH = total > 0 ? Math.max(3, (total / maxTotal) * chartH) : 2;
+          const amzH  = total > 0 ? (m.amazon / total) * totalH : 0;
+          const stoH  = total > 0 ? (m.store  / total) * totalH : 0;
+          const fulH  = total > 0 ? (m.fuel   / total) * totalH : 0;
+          return (
+            <div key={i} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
+              <div
+                title={`${MONTH_EN[i]} ${selectedYear}\nAmazon: ${D.fmt.moneyShort(m.amazon)}\nStore: ${D.fmt.moneyShort(m.store)}\nFuel: ${D.fmt.moneyShort(m.fuel)}\nรวม: ${D.fmt.moneyShort(total)}`}
+                style={{ width: '86%', height: totalH, display: 'flex', flexDirection: 'column', borderRadius: '2px 2px 0 0', overflow: 'hidden', cursor: 'default' }}>
+                <div style={{ height: amzH, background: BIZ.amazon.color, flexShrink: 0 }} />
+                <div style={{ height: stoH, background: BIZ.store.color,  flexShrink: 0 }} />
+                <div style={{ height: fulH, background: BIZ.fuel.color,   flexShrink: 0 }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Month labels */}
+      <div style={{ display: 'flex', gap: 2, marginTop: 4 }}>
+        {MONTH_EN.map((l, i) => (
+          <div key={i} style={{ flex: 1, textAlign: 'center', fontSize: 8, color: '#9CA3AF' }}>{l}</div>
+        ))}
+      </div>
+
+      {/* Year total */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: 8, paddingTop: 8, borderTop: '1px dashed #E5E7EB', fontSize: 10 }}>
+        <span style={{ color: '#6B7280' }}>รวมทั้งปี {selectedYear + 543}</span>
+        <span style={{ fontWeight: 700, color: '#111827', fontFeatureSettings: '"tnum"' }}>{D.fmt.moneyShort(yearTotal)}</span>
+      </div>
+    </div>
+  );
+}
+
 window.AddDataButton = AddDataButton;
 window.AddDataModal = AddDataModal;
 window.useReportsState = useReportsState;
 window.DateSelector = DateSelector;
 window.TrendCompare = TrendCompare;
 window.MonthlyMTD = MonthlyMTD;
+window.YearlySalesChart = YearlySalesChart;
 </script>
 
 <script type="text/babel">
