@@ -1,0 +1,6 @@
+node_modules/
+package-lock.json
+sample.txt
+parse-output.txt
+debug.js
+debug2.js
