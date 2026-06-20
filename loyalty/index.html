@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>บัตรสะสมแต้ม · ปตท.สำเร็จพัฒนา</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; min-height: 100%; }
+  body {
+    font-family: "IBM Plex Sans Thai", system-ui, sans-serif;
+    background: linear-gradient(155deg, #0F172A 0%, #1E3A5F 55%, #0B6E4F 100%);
+    min-height: 100vh; display: flex; align-items: center; justify-content: center;
+    padding: 20px;
+  }
+  .card {
+    width: 100%; max-width: 380px; background: #fff; border-radius: 16px;
+    padding: 30px 24px; box-shadow: 0 20px 50px rgba(0,0,0,0.3);
+  }
+  .logo { width: 56px; height: 56px; border-radius: 14px; background: linear-gradient(135deg, #1E3A5F, #0B6E4F);
+    display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 18px; margin: 0 auto 14px; }
+  h1 { font-size: 17px; text-align: center; margin: 0 0 4px; color: #111827; }
+  .sub { font-size: 12px; text-align: center; color: #9CA3AF; margin-bottom: 20px; line-height: 1.5; }
+  input { width: 100%; padding: 12px 14px; border: 1px solid #E5E7EB; border-radius: 8px; font-size: 15px; font-family: inherit; margin-bottom: 12px; color: #111827; }
+  button { width: 100%; padding: 13px; border: none; border-radius: 8px; background: linear-gradient(135deg, #0B6E4F, #1E3A5F);
+    color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; font-family: inherit; }
+  button:disabled { background: #E5E7EB; color: #9CA3AF; cursor: not-allowed; }
+  .qr-wrap { text-align: center; }
+  .qr-wrap img { width: 220px; height: 220px; border-radius: 12px; border: 1px solid #F1F2EE; }
+  .stamps { display: flex; justify-content: center; gap: 6px; flex-wrap: wrap; margin: 16px 0; }
+  .stamp { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 13px; flex-shrink: 0; }
+  .stamp.filled { background: #0B6E4F; color: #fff; }
+  .stamp.empty { background: #F3F4F6; color: #D1D5DB; border: 1px dashed #D1D5DB; }
+  .name { text-align: center; font-size: 16px; font-weight: 700; color: #111827; margin-bottom: 2px; }
+  .count { text-align: center; font-size: 13px; color: #6B7280; margin-bottom: 14px; }
+  .reward { text-align: center; background: #ECFDF5; border: 1px solid #6EE7B7; border-radius: 8px; padding: 10px; font-size: 13px; color: #047857; font-weight: 600; margin-top: 14px; }
+  .err { color: #C84B31; font-size: 12px; text-align: center; margin-top: 8px; }
+  .loading { text-align: center; color: #9CA3AF; font-size: 13px; padding: 40px 0; }
+</style>
+</head>
+<body>
+<div id="root" class="card"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="../firebase-config.js"></script>
+<script>
+firebase.initializeApp(window.FIREBASE_CONFIG);
+const db = firebase.firestore();
+
+const GOAL = 10;
+const root = document.getElementById('root');
+const LS_KEY = 'loy_customer_id';
+
+function genId() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let s = '';
+  for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)];
+  return s;
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+function renderRegister() {
+  root.innerHTML = `
+    <div class="logo">PTT</div>
+    <h1>สมัครบัตรสะสมแต้ม</h1>
+    <div class="sub">ปตท.สำเร็จพัฒนา<br/>ซื้อครบ ${GOAL} ครั้ง รับของรางวัลฟรี</div>
+    <input id="nameInput" placeholder="ชื่อของคุณ" />
+    <input id="phoneInput" placeholder="เบอร์โทร (ไม่บังคับ)" inputmode="tel" />
+    <button id="joinBtn">สมัครสมาชิก</button>
+    <div class="err" id="err"></div>
+  `;
+  document.getElementById('joinBtn').onclick = async () => {
+    const name = document.getElementById('nameInput').value.trim();
+    const phone = document.getElementById('phoneInput').value.trim();
+    const errEl = document.getElementById('err');
+    if (!name) { errEl.textContent = 'กรุณากรอกชื่อ'; return; }
+    const btn = document.getElementById('joinBtn');
+    btn.disabled = true; btn.textContent = 'กำลังสมัคร…'; errEl.textContent = '';
+    const id = genId();
+    try {
+      await db.collection('loyalty_customers').doc(id).set({
+        name, phone: phone || null, stamps: 0, totalEver: 0, redeemedCount: 0,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        lastStampAt: null,
+      });
+      localStorage.setItem(LS_KEY, id);
+      renderCard(id);
+    } catch (e) {
+      errEl.textContent = 'เกิดข้อผิดพลาด ลองใหม่อีกครั้ง';
+      btn.disabled = false; btn.textContent = 'สมัครสมาชิก';
+    }
+  };
+}
+
+async function renderCard(id, silent) {
+  if (!silent) root.innerHTML = `<div class="loading">กำลังโหลด…</div>`;
+  let doc;
+  try { doc = await db.collection('loyalty_customers').doc(id).get(); }
+  catch (e) { if (!silent) root.innerHTML = `<div class="loading">เชื่อมต่อไม่ได้ ลองใหม่อีกครั้ง</div>`; return; }
+  if (!doc.exists) { localStorage.removeItem(LS_KEY); renderRegister(); return; }
+  const data = doc.data();
+  const stamps = data.stamps || 0;
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=LOY-${id}`;
+  let stampHtml = '';
+  for (let i = 0; i < GOAL; i++) {
+    stampHtml += `<div class="stamp ${i < stamps ? 'filled' : 'empty'}">${i < stamps ? '☕' : ''}</div>`;
+  }
+  root.innerHTML = `
+    <div class="logo">PTT</div>
+    <div class="name">${escapeHtml(data.name)}</div>
+    <div class="count">สะสมแล้ว ${stamps}/${GOAL} แต้ม</div>
+    <div class="stamps">${stampHtml}</div>
+    <div class="qr-wrap"><img src="${qrUrl}" alt="QR" /></div>
+    <div class="sub" style="margin-top:14px;">โชว์ QR นี้ให้พนักงานสแกนทุกครั้งที่ซื้อของ</div>
+    ${stamps >= GOAL ? '<div class="reward">🎉 ครบแต้มแล้ว! แจ้งพนักงานเพื่อรับของรางวัล</div>' : ''}
+  `;
+}
+
+// Init
+const existingId = localStorage.getItem(LS_KEY);
+if (existingId) renderCard(existingId);
+else renderRegister();
+
+// Silent refresh every 10s so stamp count updates live after staff scans
+setInterval(() => {
+  const id = localStorage.getItem(LS_KEY);
+  if (id && root.querySelector('.qr-wrap')) renderCard(id, true);
+}, 10000);
+</script>
+</body>
+</html>

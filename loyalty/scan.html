@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="th">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>สแกนสะสมแต้ม · Staff</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; }
+  body { font-family: "IBM Plex Sans Thai", system-ui, sans-serif; background: #0F172A; color: #fff; }
+  #root { height: 100vh; display: flex; flex-direction: column; }
+
+  .pin-screen { flex: 1; display: flex; align-items: center; justify-content: center; padding: 20px; }
+  .pin-card { width: 100%; max-width: 320px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.14); border-radius: 14px; padding: 28px 24px; }
+  .pin-card h1 { font-size: 16px; text-align: center; margin: 0 0 16px; }
+  .pin-card input { width: 100%; padding: 13px; font-size: 20px; text-align: center; letter-spacing: 8px; border-radius: 8px; border: 1.5px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.08); color: #fff; font-family: inherit; margin-bottom: 12px; }
+  .pin-card button { width: 100%; padding: 12px; border: none; border-radius: 8px; background: linear-gradient(135deg,#0B6E4F,#1E3A5F); color: #fff; font-weight: 700; font-size: 14px; cursor: pointer; font-family: inherit; }
+  .err { color: #F87171; font-size: 12px; text-align: center; margin-top: 8px; }
+
+  .scan-header { padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; background: rgba(255,255,255,0.04); flex-shrink: 0; }
+  .scan-header .title { font-size: 14px; font-weight: 700; }
+  .scan-header button { background: transparent; border: 1px solid rgba(255,255,255,0.2); color: #94A3B8; border-radius: 6px; padding: 6px 10px; font-size: 11px; cursor: pointer; font-family: inherit; }
+
+  .cam-wrap { flex: 1; position: relative; background: #000; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+  video { width: 100%; height: 100%; object-fit: cover; }
+  .frame { position: absolute; width: 220px; height: 220px; border: 3px solid rgba(255,255,255,0.6); border-radius: 16px; box-shadow: 0 0 0 2000px rgba(0,0,0,0.35); pointer-events: none; }
+
+  .result-overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 24px; background: rgba(15,23,42,0.92); }
+  .result-card { width: 100%; max-width: 320px; background: #fff; color: #111827; border-radius: 16px; padding: 28px 24px; text-align: center; }
+  .result-card .icon { font-size: 40px; margin-bottom: 10px; }
+  .result-card .name { font-size: 17px; font-weight: 700; }
+  .result-card .points { font-size: 13px; color: #6B7280; margin-top: 4px; }
+  .result-card .reward { margin-top: 12px; background: #ECFDF5; border: 1px solid #6EE7B7; border-radius: 8px; padding: 10px; font-size: 12px; color: #047857; font-weight: 700; }
+  .erricon { color: #C84B31; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="../firebase-config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
+<script>
+firebase.initializeApp(window.FIREBASE_CONFIG);
+const db = firebase.firestore();
+
+const GOAL = 10;
+// SHA-256 of staff PIN "8899". To change: hash the new PIN and replace this value.
+const PIN_HASH = '9800a8677d99e5f6968d7357e44006388b09d3b6a8676d0f930fbaa63d02330d';
+const PIN_SESSION_KEY = 'loy_staff_ok';
+const DEBOUNCE_MS = 60 * 1000;
+
+const root = document.getElementById('root');
+
+async function sha256hex(str) {
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function renderPinScreen() {
+  root.innerHTML = `
+    <div class="pin-screen">
+      <div class="pin-card">
+        <h1>🔒 รหัสพนักงาน</h1>
+        <input id="pinInput" type="password" inputmode="numeric" maxlength="4" placeholder="••••" autofocus />
+        <button id="pinBtn">เข้าใช้งาน</button>
+        <div class="err" id="pinErr"></div>
+      </div>
+    </div>
+  `;
+  document.getElementById('pinBtn').onclick = checkPin;
+  document.getElementById('pinInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') checkPin(); });
+}
+
+async function checkPin() {
+  const val = document.getElementById('pinInput').value.trim();
+  const hash = await sha256hex(val);
+  if (hash === PIN_HASH) {
+    sessionStorage.setItem(PIN_SESSION_KEY, '1');
+    renderScanner();
+  } else {
+    document.getElementById('pinErr').textContent = 'รหัสไม่ถูกต้อง';
+  }
+}
+
+let lastScanCode = null;
+let lastScanTime = 0;
+let scanning = false;
+let stream = null;
+
+function renderScanner() {
+  root.innerHTML = `
+    <div class="scan-header">
+      <div class="title">📷 สแกนสะสมแต้ม</div>
+      <button id="logoutBtn">ออก</button>
+    </div>
+    <div class="cam-wrap">
+      <video id="video" playsinline muted></video>
+      <div class="frame"></div>
+      <canvas id="canvas" style="display:none;"></canvas>
+      <div id="overlay"></div>
+    </div>
+  `;
+  document.getElementById('logoutBtn').onclick = () => {
+    sessionStorage.removeItem(PIN_SESSION_KEY);
+    stopCamera();
+    renderPinScreen();
+  };
+  startCamera();
+}
+
+async function startCamera() {
+  const video = document.getElementById('video');
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+    video.srcObject = stream;
+    await video.play();
+    scanning = true;
+    requestAnimationFrame(tick);
+  } catch (e) {
+    document.getElementById('overlay').innerHTML =
+      `<div class="result-overlay"><div class="result-card"><div class="erricon">⚠ เปิดกล้องไม่ได้<br>${e.message}</div></div></div>`;
+  }
+}
+function stopCamera() {
+  scanning = false;
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+}
+
+function tick() {
+  if (!scanning) return;
+  const video = document.getElementById('video');
+  const canvas = document.getElementById('canvas');
+  if (video.readyState === video.HAVE_ENOUGH_DATA) {
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const code = jsQR(imgData.data, imgData.width, imgData.height);
+    if (code && code.data && code.data.startsWith('LOY-')) {
+      handleScan(code.data.slice(4));
+      return; // pause loop until result dismissed
+    }
+  }
+  requestAnimationFrame(tick);
+}
+
+async function handleScan(customerId) {
+  const now = Date.now();
+  if (customerId === lastScanCode && now - lastScanTime < DEBOUNCE_MS) {
+    requestAnimationFrame(tick);
+    return;
+  }
+  lastScanCode = customerId; lastScanTime = now;
+  scanning = false;
+
+  try {
+    const ref = db.collection('loyalty_customers').doc(customerId);
+    const doc = await ref.get();
+    if (!doc.exists) { showResult({ error: 'ไม่พบสมาชิกนี้' }); return; }
+    const data = doc.data();
+    let stamps = (data.stamps || 0) + 1;
+    let redeemedCount = data.redeemedCount || 0;
+    let justRedeemed = false;
+    if (stamps >= GOAL) { stamps = 0; redeemedCount += 1; justRedeemed = true; }
+    await ref.update({
+      stamps,
+      totalEver: (data.totalEver || 0) + 1,
+      redeemedCount,
+      lastStampAt: firebase.firestore.FieldValue.serverTimestamp(),
+    });
+    showResult({ name: data.name, stamps, justRedeemed });
+  } catch (e) {
+    showResult({ error: 'เกิดข้อผิดพลาด: ' + e.message });
+  }
+}
+
+function escapeHtml(s) {
+  const div = document.createElement('div');
+  div.textContent = s;
+  return div.innerHTML;
+}
+
+function showResult({ name, stamps, justRedeemed, error }) {
+  const overlay = document.getElementById('overlay');
+  overlay.innerHTML = `
+    <div class="result-overlay">
+      <div class="result-card">
+        ${error
+          ? `<div class="icon">⚠</div><div class="name erricon">${error}</div>`
+          : `<div class="icon">${justRedeemed ? '🎉' : '✅'}</div>
+             <div class="name">${escapeHtml(name)}</div>
+             <div class="points">${justRedeemed ? 'ครบแต้ม! รีเซ็ตแต้มใหม่' : `แต้มสะสม ${stamps}/${GOAL}`}</div>
+             ${justRedeemed ? '<div class="reward">มอบของรางวัลให้ลูกค้าได้เลย 🎁</div>' : ''}`
+        }
+      </div>
+    </div>
+  `;
+  setTimeout(() => {
+    overlay.innerHTML = '';
+    scanning = true;
+    requestAnimationFrame(tick);
+  }, 2200);
+}
+
+// Init
+if (sessionStorage.getItem(PIN_SESSION_KEY) === '1') renderScanner();
+else renderPinScreen();
+</script>
+</body>
+</html>
